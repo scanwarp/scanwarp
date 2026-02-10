@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "scanwarp": {
+      "command": "npx",
+      "args": [
+        "@scanwarp/mcp",
+        "--server",
+        "http://localhost:3000",
+        "--project",
+        "your-project-id-here"
+      ]
+    }
+  }
+}

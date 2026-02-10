@@ -2,7 +2,11 @@
   "name": "@scanwarp/mcp",
   "version": "0.1.0",
   "description": "ScanWarp MCP server",
+  "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "scanwarp-mcp": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -10,12 +14,13 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
-  "keywords": [],
+  "keywords": ["mcp", "monitoring", "scanwarp"],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@scanwarp/core": "workspace:*"
+    "@scanwarp/core": "workspace:*",
+    "axios": "^1.6.5"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
