@@ -7,7 +7,14 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(git init:*)",
-      "Bash(pnpm add:*)"
+      "Bash(pnpm add:*)",
+      "Bash(git remote add:*)",
+      "Bash(gh auth:*)",
+      "Bash(git remote remove:*)",
+      "Bash(git config:*)",
+      "Bash(git branch:*)",
+      "Bash(git pull:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []
