@@ -104,6 +104,16 @@ CREATE TABLE IF NOT EXISTS notification_log (
 CREATE INDEX idx_notification_log_channel_id ON notification_log(channel_id);
 CREATE INDEX idx_notification_log_sent_at ON notification_log(sent_at);
 
+-- Waitlist entries
+CREATE TABLE IF NOT EXISTS waitlist (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email VARCHAR(255) NOT NULL UNIQUE,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_waitlist_created_at ON waitlist(created_at);
+CREATE INDEX idx_waitlist_email ON waitlist(email);
+
 -- Legacy webhook events (keeping for compatibility)
 CREATE TABLE IF NOT EXISTS webhook_events (
   id SERIAL PRIMARY KEY,

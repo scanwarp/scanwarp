@@ -54,9 +54,9 @@ Traditional monitoring tools show you *what* broke. ScanWarp tells you *why* and
 
 ## Community
 
+- [Website](https://scanwarp.com)
+- [Discord](https://discord.gg/K79UAMudM)
 - [Documentation](https://docs.scanwarp.com) (coming soon)
-- [Discord](https://discord.gg/scanwarp) (coming soon)
-- [Website](https://scanwarp.com) (coming soon)
 
 ## License
 

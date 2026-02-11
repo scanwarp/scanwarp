@@ -439,6 +439,64 @@ async function getOrCreateProject(name: string): Promise<string> {
   return created[0].id;
 }
 
+// ===== WAITLIST ENDPOINTS =====
+
+// Submit email to waitlist
+fastify.post('/waitlist', async (request, reply) => {
+  const { email } = request.body as { email: string };
+
+  if (!email || !email.includes('@')) {
+    return reply.code(400).send({ error: 'Valid email required' });
+  }
+
+  try {
+    await sql`
+      INSERT INTO waitlist (email)
+      VALUES (${email.toLowerCase().trim()})
+      ON CONFLICT (email) DO NOTHING
+    `;
+
+    return { success: true, message: 'Added to waitlist' };
+  } catch (err) {
+    request.log.error({ err }, 'Failed to add to waitlist');
+    return reply.code(500).send({ error: 'Failed to add to waitlist' });
+  }
+});
+
+// Get all waitlist entries (admin only - requires API token)
+fastify.get('/waitlist', async (request, reply) => {
+  const token = request.headers.authorization?.replace('Bearer ', '');
+  const apiToken = process.env.API_TOKEN;
+
+  if (!apiToken || token !== apiToken) {
+    return reply.code(401).send({ error: 'Unauthorized' });
+  }
+
+  try {
+    const entries = await sql<Array<{
+      id: string;
+      email: string;
+      created_at: Date;
+    }>>`
+      SELECT id, email, created_at
+      FROM waitlist
+      ORDER BY created_at DESC
+    `;
+
+    return {
+      count: entries.length,
+      entries: entries.map(e => ({
+        id: e.id,
+        email: e.email,
+        created_at: e.created_at,
+      })),
+    };
+  } catch (err) {
+    request.log.error({ err }, 'Failed to fetch waitlist');
+    return reply.code(500).send({ error: 'Failed to fetch waitlist' });
+  }
+});
+
 const start = async () => {
   try {
     const port = parseInt(process.env.PORT || '3000');
