@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { createServer, type Server } from 'http';
 import { watch as chokidarWatch, type FSWatcher } from 'chokidar';
 import { detectProject, type DetectedProject } from '../detector.js';
+import { AnalysisEngine } from '../dev/analysis-engine.js';
 
 interface DevOptions {
   command?: string;
@@ -43,6 +44,8 @@ interface MemoryStore {
   events: StoredEvent[];
   /** Set to true once the initial crawl is done and we should print the live request log */
   liveLogEnabled: boolean;
+  /** Analysis engine for real-time trace analysis */
+  analysisEngine: AnalysisEngine;
 }
 
 /** Stored result from checking a single route */
@@ -379,6 +382,7 @@ async function startLocalServer(
     spans: [],
     events: [],
     liveLogEnabled: false,
+    analysisEngine: new AnalysisEngine(),
   };
 
   const server = createServer((req, res) => {
@@ -546,6 +550,25 @@ function handleTraceIngest(body: string, store: MemoryStore) {
   }
   if (store.events.length > 1000) {
     store.events = store.events.slice(-1000);
+  }
+
+  // Run analysis on complete traces
+  if (store.liveLogEnabled) {
+    // Collect trace IDs from the spans we just ingested
+    const newTraceIds = new Set<string>();
+    for (const resourceSpan of payload.resourceSpans) {
+      for (const scopeSpan of resourceSpan.scopeSpans || []) {
+        for (const otlpSpan of scopeSpan.spans || []) {
+          newTraceIds.add(otlpSpan.traceId);
+        }
+      }
+    }
+
+    // For each trace, gather all known spans and run analysis
+    for (const traceId of newTraceIds) {
+      const traceSpans = store.spans.filter((s) => s.trace_id === traceId);
+      store.analysisEngine.analyzeTrace(traceSpans);
+    }
   }
 }
 
@@ -1001,6 +1024,22 @@ function printSessionSummary(store: MemoryStore) {
 
   if (slowQueries.length > 0) {
     console.log(chalk.yellow(`  Slow queries: ${slowQueries.length}`));
+  }
+
+  // Analysis summary
+  const analysis = store.analysisEngine.getSummary();
+  if (analysis.total > 0) {
+    console.log('');
+    console.log(chalk.bold('  Analysis:'));
+    if (analysis.active > 0) {
+      console.log(chalk.yellow(`  Active issues: ${analysis.active}`));
+    }
+    if (analysis.resolved > 0) {
+      console.log(chalk.green(`  Resolved:      ${analysis.resolved}`));
+    }
+    for (const [rule, count] of analysis.byRule) {
+      console.log(chalk.gray(`    ${rule}: ${count}`));
+    }
   }
 
   console.log('');
