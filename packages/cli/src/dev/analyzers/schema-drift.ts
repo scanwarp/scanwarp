@@ -248,27 +248,29 @@ export class SchemaTracker {
   static printDrift(route: string, method: string, diffs: SchemaDiff[]) {
     if (diffs.length === 0) return;
 
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
     console.log('');
-    console.log(chalk.yellow(`   ⚠ Schema drift: ${method} ${route}`));
+    console.log(chalk.yellow(`   ${time}  ⚠  ${method} ${route}  — schema changed`));
+
+    let hasBreakingChange = false;
 
     for (const diff of diffs) {
-      const icon = diff.type === 'removed'
-        ? chalk.red('−')
-        : diff.type === 'type_changed'
-          ? chalk.yellow('~')
-          : diff.type === 'added'
-            ? chalk.green('+')
-            : chalk.blue('?');
+      if (diff.type === 'removed') {
+        console.log(chalk.red(`           Removed field: ${diff.path} (${diff.detail})`));
+        hasBreakingChange = true;
+      } else if (diff.type === 'type_changed') {
+        console.log(chalk.yellow(`           Type changed: ${diff.path} (${diff.detail})`));
+        hasBreakingChange = true;
+      } else if (diff.type === 'added') {
+        console.log(chalk.cyan(`           New field: ${diff.path} (${diff.detail})`));
+      } else if (diff.type === 'null_changed') {
+        console.log(chalk.blue(`           Null changed: ${diff.path} (${diff.detail})`));
+        hasBreakingChange = true;
+      }
+    }
 
-      const label = diff.type === 'removed'
-        ? chalk.red('REMOVED')
-        : diff.type === 'type_changed'
-          ? chalk.yellow('TYPE CHANGED')
-          : diff.type === 'added'
-            ? chalk.cyan('NEW FIELD')
-            : chalk.blue('NULL CHANGED');
-
-      console.log(`     ${icon} ${chalk.white(diff.path)}  ${label}  ${chalk.gray(diff.detail)}`);
+    if (hasBreakingChange) {
+      console.log(chalk.yellow(`           ⚠ This may break frontend consumers of this API`));
     }
   }
 }

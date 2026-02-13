@@ -479,6 +479,7 @@ async function startLocalServer(
             total_traces: traceIds.size,
             active_issues: store.analysisEngine.activeIssueCount,
             error_count: store.events.filter((e) => e.type === 'trace_error').length,
+            schema_baselines: store.schemaTracker.getBaselineCount(),
           }));
           return;
         }
