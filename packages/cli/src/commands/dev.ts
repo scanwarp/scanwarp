@@ -108,8 +108,10 @@ export async function devCommand(options: DevOptions = {}) {
 
   const child = startDevServer(devCmd, cwd, scanwarpPort, isNextJs);
 
-  // Track previous route check results for comparison
+  // Track previous route check results for comparison and baselines
   const previousResults = new Map<string, RouteCheckResult>();
+  /** First successful response time per route — used to detect slow regressions */
+  const baselines = new Map<string, number>();
   let watcher: FSWatcher | undefined;
 
   // Handle cleanup
@@ -148,9 +150,12 @@ export async function devCommand(options: DevOptions = {}) {
         console.log(chalk.bold.cyan('\n  Initial route check\n'));
         const initialResults = await crawlRoutes(routes, devServerPort);
 
-        // Store initial results for comparison
+        // Store initial results as both previous and baseline
         for (const r of initialResults) {
           previousResults.set(r.route, r);
+          if (r.status > 0 && r.status < 400) {
+            baselines.set(r.route, r.timeMs);
+          }
         }
 
         console.log(chalk.gray('\n─'.repeat(60)));
@@ -162,7 +167,7 @@ export async function devCommand(options: DevOptions = {}) {
   }
 
   // Step 7: Start file watcher
-  watcher = startFileWatcher(cwd, routes, routeFileMap, previousResults, devServerPort);
+  watcher = startFileWatcher(cwd, routes, routeFileMap, previousResults, baselines, devServerPort);
 
   // Enable live request log
   store.liveLogEnabled = true;
@@ -786,15 +791,25 @@ async function checkRoutes(routes: string[], port: number): Promise<RouteCheckRe
   return results;
 }
 
+interface PrintRouteOptions {
+  previousResults?: Map<string, RouteCheckResult>;
+  baselines?: Map<string, number>;
+  /** When true, only print routes with changes/errors/slow regressions */
+  quiet?: boolean;
+}
+
 /** Print route check results with aligned columns */
-function printRouteResults(results: RouteCheckResult[], previousResults?: Map<string, RouteCheckResult>) {
+function printRouteResults(results: RouteCheckResult[], opts: PrintRouteOptions = {}) {
   if (results.length === 0) return;
 
+  const { previousResults, baselines, quiet } = opts;
   const maxRouteLen = Math.max(...results.map((r) => `${r.method} ${r.route}`.length));
+
+  let printedCount = 0;
+  let suppressedOkCount = 0;
 
   for (const r of results) {
     const isOk = r.status > 0 && r.status < 400;
-    const icon = isOk ? chalk.green('✓') : chalk.red('✗');
     const label = `${r.method} ${r.route}`;
     const padded = label.padEnd(maxRouteLen + 2);
     const timeStr = `${r.timeMs}ms`.padStart(6);
@@ -805,27 +820,47 @@ function printRouteResults(results: RouteCheckResult[], previousResults?: Map<st
 
     // Change indicator compared to previous results
     let changeIndicator = '';
+    let hasChange = false;
+
     if (previousResults) {
       const prev = previousResults.get(r.route);
       if (prev) {
         const prevOk = prev.status > 0 && prev.status < 400;
         if (!prevOk && isOk) {
           changeIndicator = `  ${chalk.green('FIXED')}`;
+          hasChange = true;
         } else if (prevOk && !isOk) {
           changeIndicator = `  ${chalk.red('BROKE')}`;
+          hasChange = true;
         } else if (prev.status !== r.status) {
           changeIndicator = `  ${chalk.yellow(`${prev.status}→${r.status}`)}`;
-        } else if (Math.abs(r.timeMs - prev.timeMs) > 100) {
-          const delta = r.timeMs - prev.timeMs;
-          const sign = delta > 0 ? '+' : '';
-          changeIndicator = `  ${chalk.gray(`${sign}${delta}ms`)}`;
+          hasChange = true;
         }
       } else {
         changeIndicator = `  ${chalk.cyan('NEW')}`;
+        hasChange = true;
       }
     }
 
-    console.log(`   ${icon} ${padded} ${timeColor}${statusStr}${errStr}${changeIndicator}`);
+    // Slow regression detection: 3x baseline AND over 500ms
+    let slowIndicator = '';
+    if (isOk && baselines) {
+      const baseline = baselines.get(r.route);
+      if (baseline !== undefined && r.timeMs > 500 && r.timeMs > baseline * 3) {
+        slowIndicator = `  ${chalk.yellow(`SLOW (baseline: ${baseline}ms)`)}`;
+        hasChange = true;
+      }
+    }
+
+    // In quiet mode, skip routes that are OK with no changes and no slow regression
+    if (quiet && isOk && !hasChange) {
+      suppressedOkCount++;
+      continue;
+    }
+
+    const icon = isOk ? chalk.green('✓') : chalk.red('✗');
+    console.log(`   ${icon} ${padded} ${timeColor}${statusStr}${errStr}${changeIndicator}${slowIndicator}`);
+    printedCount++;
   }
 
   // Summary
@@ -835,6 +870,16 @@ function printRouteResults(results: RouteCheckResult[], previousResults?: Map<st
   const avgTime = validResults.length > 0
     ? Math.round(validResults.reduce((sum, r) => sum + r.timeMs, 0) / validResults.length)
     : 0;
+
+  if (quiet && suppressedOkCount > 0 && printedCount > 0) {
+    console.log(chalk.gray(`   ... (${suppressedOkCount} more OK)`));
+  }
+
+  // In quiet mode with nothing interesting, print a single line
+  if (quiet && printedCount === 0) {
+    console.log(chalk.gray(`   ✓ All ${okCount} routes OK (avg ${avgTime}ms)`));
+    return;
+  }
 
   console.log('');
   console.log(
@@ -851,6 +896,7 @@ function startFileWatcher(
   routes: DiscoveredRoutes,
   routeFileMap: RouteFileMap,
   previousResults: Map<string, RouteCheckResult>,
+  baselines: Map<string, number>,
   devServerPort: number,
 ): FSWatcher {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -878,18 +924,22 @@ function startFileWatcher(
       const affectedRoutes = resolveAffectedRoutes(changedFiles, routes, routeFileMap);
       if (affectedRoutes.length === 0) return;
 
+      const fileNames = [...changedFiles].map((f) => path.relative(cwd, f)).join(', ');
       console.log('');
       console.log(chalk.gray('─'.repeat(60)));
-      const fileNames = [...changedFiles].map((f) => path.relative(cwd, f)).join(', ');
-      console.log(chalk.bold.cyan(`\n  File changed: ${fileNames}\n`));
-      console.log(chalk.bold(`  Re-checking ${affectedRoutes.length} route${affectedRoutes.length > 1 ? 's' : ''}:\n`));
+      console.log(chalk.bold.cyan(`\n  File changed: ${chalk.white(fileNames)}\n`));
+      console.log(chalk.bold(`  Re-checking ${affectedRoutes.length} route${affectedRoutes.length > 1 ? 's' : ''}...\n`));
 
       const newResults = await checkRoutes(affectedRoutes, devServerPort);
-      printRouteResults(newResults, previousResults);
+      printRouteResults(newResults, { previousResults, baselines, quiet: true });
 
-      // Update previous results
+      // Update previous results and baselines
       for (const r of newResults) {
         previousResults.set(r.route, r);
+        // Set baseline on first success (don't overwrite existing baselines)
+        if (r.status > 0 && r.status < 400 && !baselines.has(r.route)) {
+          baselines.set(r.route, r.timeMs);
+        }
       }
 
       console.log(chalk.gray('\n─'.repeat(60)));
