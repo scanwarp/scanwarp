@@ -200,25 +200,6 @@ importers:
         specifier: ^5.3.3
         version: 5.9.3
 
-  packages/mcp:
-    dependencies:
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.0.0
-        version: 1.26.0(zod@4.3.6)
-      '@scanwarp/core':
-        specifier: workspace:*
-        version: link:../core
-      axios:
-        specifier: ^1.6.5
-        version: 1.13.5
-    devDependencies:
-      '@types/node':
-        specifier: ^20.11.0
-        version: 20.19.33
-      typescript:
-        specifier: ^5.3.3
-        version: 5.9.3
-
 packages:
 
   '@alloc/quick-lru@5.2.0':
