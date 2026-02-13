@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { Event, Monitor, DiagnosisResult } from './types.js';
+import type { Event, Monitor, DiagnosisResult, TraceSpan } from './types.js';
 
 interface DiagnoserConfig {
   apiKey: string;
@@ -14,7 +14,10 @@ interface DiagnosisContext {
     status: string;
     message: string;
   }>;
+  traces?: TraceSpan[];
 }
+
+export { type DiagnosisContext };
 
 export class Diagnoser {
   private client: Anthropic;
@@ -34,7 +37,7 @@ export class Diagnoser {
       model: this.model,
       max_tokens: 2000,
       temperature: 0.3,
-      system: this.getSystemPrompt(),
+      system: this.getSystemPrompt(context),
       messages: [
         {
           role: 'user',
@@ -51,14 +54,16 @@ export class Diagnoser {
     return this.parseResponse(content.text);
   }
 
-  private getSystemPrompt(): string {
+  private getSystemPrompt(context: DiagnosisContext): string {
+    const hasTraces = context.traces && context.traces.length > 0;
+
     return `You are a senior engineering mentor helping developers who built their application using AI coding tools like Cursor or Claude Code. These developers may not have deep infrastructure knowledge or be familiar with reading stack traces.
 
 Your job is to:
 1. Explain what went wrong in plain, conversational English (no jargon)
 2. Explain WHY it happened in a way a non-expert can understand
 3. Provide a clear, actionable fix in plain language
-4. Write a ready-to-paste prompt they can give to their AI coding assistant to fix the issue
+4. Write a ready-to-paste prompt they can give to their AI coding assistant to fix the issue${hasTraces ? '\n5. Identify the specific span (operation) that is the bottleneck or root cause' : ''}
 
 Think of yourself as a patient mentor who's explaining a production issue to someone smart but new to production systems.
 
@@ -67,14 +72,16 @@ IMPORTANT RULES:
 - NO raw stack traces in your response
 - Use analogies when helpful
 - Be encouraging, not condescending
-- Focus on "what to do" not "what you did wrong"
+- Focus on "what to do" not "what you did wrong"${hasTraces ? '\n- When trace data is available, use it to pinpoint the EXACT operation that failed or is slow' : ''}
 
 Respond in this exact JSON format:
 {
   "root_cause": "1-2 sentence plain English explanation of what broke",
   "severity": "critical|warning|info",
   "suggested_fix": "Plain English explanation of how to fix it (2-4 sentences)",
-  "fix_prompt": "A complete, copy-pasteable prompt for Cursor/Claude Code that will fix this issue"
+  "fix_prompt": "A complete, copy-pasteable prompt for Cursor/Claude Code that will fix this issue"${hasTraces ? `,
+  "bottleneck_span": "name of the span that is the root cause (e.g. 'stripe: payment_intents.create' or 'pg: SELECT * FROM users')",
+  "trace_id": "the trace_id of the most relevant trace"` : ''}
 }
 
 The fix_prompt should be detailed and include:
@@ -87,7 +94,7 @@ Make the fix_prompt actionable enough that an AI coding assistant can implement 
   }
 
   private buildPrompt(context: DiagnosisContext): string {
-    const { events, monitor, recentHistory } = context;
+    const { events, monitor, recentHistory, traces } = context;
 
     let prompt = '## Production Issue Detected\n\n';
 
@@ -110,6 +117,17 @@ Make the fix_prompt actionable enough that an AI coding assistant can implement 
         }
       }
       prompt += '\n';
+    }
+
+    // Add trace waterfall if available
+    if (traces && traces.length > 0) {
+      const waterfall = buildTraceWaterfall(traces);
+      if (waterfall) {
+        prompt += `\n**Request Traces (from OpenTelemetry instrumentation):**\n`;
+        prompt += `These traces show the exact sequence of operations your app performed during the failing request(s).\n\n`;
+        prompt += waterfall;
+        prompt += '\n';
+      }
     }
 
     // Add recent history if available
@@ -140,6 +158,14 @@ Make the fix_prompt actionable enough that an AI coding assistant can implement 
       'message',
       'type',
       'source',
+      'trace_id',
+      'span_id',
+      'service_name',
+      'operation_name',
+      'duration_ms',
+      'status_message',
+      'db_system',
+      'db_statement',
     ];
 
     for (const field of relevantFields) {
@@ -166,6 +192,8 @@ Make the fix_prompt actionable enough that an AI coding assistant can implement 
         severity: this.normalizeSeverity(parsed.severity),
         suggested_fix: parsed.suggested_fix || 'No fix suggested',
         fix_prompt: parsed.fix_prompt || 'No fix prompt provided',
+        bottleneck_span: parsed.bottleneck_span || undefined,
+        trace_id: parsed.trace_id || undefined,
       };
     } catch (error) {
       // Fallback if parsing fails
@@ -186,4 +214,160 @@ Make the fix_prompt actionable enough that an AI coding assistant can implement 
     if (normalized === 'warning') return 'warning';
     return 'info';
   }
+}
+
+/**
+ * Build a human-readable waterfall view of traces, grouped by trace_id.
+ * Each trace shows the root span and its children as an indented tree.
+ */
+function buildTraceWaterfall(spans: TraceSpan[]): string {
+  // Group spans by trace_id
+  const traceMap = new Map<string, TraceSpan[]>();
+  for (const span of spans) {
+    const group = traceMap.get(span.trace_id) || [];
+    group.push(span);
+    traceMap.set(span.trace_id, group);
+  }
+
+  const sections: string[] = [];
+
+  for (const [traceId, traceSpans] of traceMap) {
+    // Sort by start_time
+    traceSpans.sort((a, b) => a.start_time - b.start_time);
+
+    // Build a parent → children index
+    const childrenMap = new Map<string | null, TraceSpan[]>();
+    for (const span of traceSpans) {
+      const parentKey = span.parent_span_id;
+      const siblings = childrenMap.get(parentKey) || [];
+      siblings.push(span);
+      childrenMap.set(parentKey, siblings);
+    }
+
+    // Find root spans (no parent or parent not in this trace)
+    const spanIds = new Set(traceSpans.map((s) => s.span_id));
+    const roots = traceSpans.filter(
+      (s) => !s.parent_span_id || !spanIds.has(s.parent_span_id)
+    );
+
+    if (roots.length === 0) continue;
+
+    let section = `\`\`\`\nTrace ${traceId}\n`;
+
+    for (const root of roots) {
+      section += renderSpanTree(root, childrenMap, '', true);
+    }
+
+    section += '```\n';
+    sections.push(section);
+
+    // Limit to 5 traces to keep prompt size reasonable
+    if (sections.length >= 5) break;
+  }
+
+  return sections.join('\n');
+}
+
+/**
+ * Render a single span and its children as an indented tree.
+ */
+function renderSpanTree(
+  span: TraceSpan,
+  childrenMap: Map<string | null, TraceSpan[]>,
+  prefix: string,
+  isLast: boolean,
+): string {
+  const status = formatSpanStatus(span);
+  const label = formatSpanLabel(span);
+  const connector = prefix === '' ? '' : isLast ? '└─ ' : '├─ ';
+
+  let line = `${prefix}${connector}${label} (${span.duration_ms}ms) ${status}\n`;
+
+  // Add key attributes on a sub-line for context
+  const detail = formatSpanDetail(span);
+  if (detail) {
+    const detailPrefix = prefix === '' ? '   ' : prefix + (isLast ? '   ' : '│  ');
+    line += `${detailPrefix}${detail}\n`;
+  }
+
+  // Render children
+  const children = childrenMap.get(span.span_id) || [];
+  children.sort((a, b) => a.start_time - b.start_time);
+
+  const childPrefix = prefix === '' ? '' : prefix + (isLast ? '   ' : '│  ');
+
+  for (let i = 0; i < children.length; i++) {
+    line += renderSpanTree(children[i], childrenMap, childPrefix, i === children.length - 1);
+  }
+
+  return line;
+}
+
+function formatSpanLabel(span: TraceSpan): string {
+  const attrs = span.attributes;
+
+  // Database spans: show db.system + operation
+  if (attrs['db.system']) {
+    const stmt = attrs['db.statement'];
+    if (typeof stmt === 'string') {
+      const truncated = stmt.length > 80 ? stmt.substring(0, 80) + '...' : stmt;
+      return `${attrs['db.system']}: ${truncated}`;
+    }
+    return `${attrs['db.system']}: ${span.operation_name}`;
+  }
+
+  // HTTP spans: show method + route/target
+  const method = attrs['http.method'] || attrs['http.request.method'];
+  const route = attrs['http.route'] || attrs['http.target'] || attrs['url.path'];
+  if (method && route) {
+    return `${method} ${route}`;
+  }
+
+  return span.operation_name;
+}
+
+function formatSpanStatus(span: TraceSpan): string {
+  if (span.status_code === 'ERROR') {
+    const msg = span.status_message || 'error';
+    return `✗ ${msg}`;
+  }
+  if (span.status_code === 'OK') {
+    return '✓';
+  }
+  // UNSET — infer from http.status_code if available
+  const httpStatus = span.attributes['http.status_code'] || span.attributes['http.response.status_code'];
+  if (typeof httpStatus === 'number' && httpStatus >= 400) {
+    return `✗ HTTP ${httpStatus}`;
+  }
+  return '✓';
+}
+
+function formatSpanDetail(span: TraceSpan): string {
+  const parts: string[] = [];
+  const attrs = span.attributes;
+
+  // Error message from span events
+  if (span.status_code === 'ERROR') {
+    const exceptionEvent = span.events.find((e) => e.name === 'exception');
+    if (exceptionEvent?.attributes) {
+      const msg = exceptionEvent.attributes['exception.message'];
+      if (typeof msg === 'string') {
+        parts.push(`error: ${msg.length > 120 ? msg.substring(0, 120) + '...' : msg}`);
+      }
+    }
+  }
+
+  // HTTP status
+  const httpStatus = attrs['http.status_code'] || attrs['http.response.status_code'];
+  if (httpStatus) {
+    parts.push(`status: ${httpStatus}`);
+  }
+
+  // DB statement (if not already in label, show here for children)
+  if (attrs['db.statement'] && !attrs['db.system']) {
+    const stmt = String(attrs['db.statement']);
+    parts.push(stmt.length > 80 ? stmt.substring(0, 80) + '...' : stmt);
+  }
+
+  return parts.join(' | ');
 }

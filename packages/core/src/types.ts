@@ -67,6 +67,23 @@ export interface DiagnosisResult {
   severity: 'critical' | 'warning' | 'info';
   suggested_fix: string;
   fix_prompt: string;
+  bottleneck_span?: string;
+  trace_id?: string;
+}
+
+export interface TraceSpan {
+  trace_id: string;
+  span_id: string;
+  parent_span_id: string | null;
+  service_name: string;
+  operation_name: string;
+  kind: string;
+  start_time: number;
+  duration_ms: number;
+  status_code: string | null;
+  status_message: string | null;
+  attributes: Record<string, unknown>;
+  events: Array<{ name: string; attributes?: Record<string, unknown> }>;
 }
 
 // Provider integrations
