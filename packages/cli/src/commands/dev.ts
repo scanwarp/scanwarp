@@ -46,6 +46,14 @@ interface MemoryStore {
   liveLogEnabled: boolean;
   /** Analysis engine for real-time trace analysis */
   analysisEngine: AnalysisEngine;
+  /** Discovered routes (populated after route discovery) */
+  routes: DiscoveredRoutes;
+  /** Last check results per route */
+  previousResults: Map<string, RouteCheckResult>;
+  /** Baseline response times per route */
+  baselines: Map<string, number>;
+  /** Timestamp when dev mode started */
+  startedAt: number;
 }
 
 /** Stored result from checking a single route */
@@ -98,9 +106,25 @@ export async function devCommand(options: DevOptions = {}) {
   // Step 4: Start in-memory ScanWarp server
   const scanwarpPort = options.port || (await findAvailablePort(3456));
   const { server: scanwarpServer, store } = await startLocalServer(scanwarpPort);
+
+  // Share route data with the store (for MCP API access)
+  store.routes = routes;
+
   console.log(
     chalk.green(`  ScanWarp local server: http://localhost:${scanwarpPort}\n`)
   );
+
+  // Print MCP configuration instructions
+  console.log(chalk.bold('  MCP for AI coding tools:\n'));
+  console.log(chalk.gray(`  Add to your MCP config (.cursor/mcp.json or claude_desktop_config.json):`));
+  console.log(chalk.gray(`  {`));
+  console.log(chalk.gray(`    "mcpServers": {`));
+  console.log(chalk.white(`      "scanwarp-dev": {`));
+  console.log(chalk.white(`        "command": "npx",`));
+  console.log(chalk.white(`        "args": ["scanwarp", "dev-mcp", "--port", "${scanwarpPort}"]`));
+  console.log(chalk.white(`      }`));
+  console.log(chalk.gray(`    }`));
+  console.log(chalk.gray(`  }\n`));
 
   // Step 5: Start the user's dev server
   const isNextJs = detected.framework === 'Next.js';
@@ -111,10 +135,9 @@ export async function devCommand(options: DevOptions = {}) {
 
   const child = startDevServer(devCmd, cwd, scanwarpPort, isNextJs);
 
-  // Track previous route check results for comparison and baselines
-  const previousResults = new Map<string, RouteCheckResult>();
-  /** First successful response time per route — used to detect slow regressions */
-  const baselines = new Map<string, number>();
+  // Use store's maps for tracking (shared with MCP API)
+  const previousResults = store.previousResults;
+  const baselines = store.baselines;
   let watcher: FSWatcher | undefined;
 
   // Handle cleanup
@@ -383,6 +406,10 @@ async function startLocalServer(
     events: [],
     liveLogEnabled: false,
     analysisEngine: new AnalysisEngine(),
+    routes: { pages: [], apiRoutes: [] },
+    previousResults: new Map(),
+    baselines: new Map(),
+    startedAt: Date.now(),
   };
 
   const server = createServer((req, res) => {
@@ -426,6 +453,147 @@ async function startLocalServer(
         if (req.method === 'GET' && req.url === '/health') {
           res.writeHead(200);
           res.end(JSON.stringify({ status: 'ok' }));
+          return;
+        }
+
+        // ─── Data API (for MCP server) ───
+
+        // GET /api/status
+        if (req.method === 'GET' && req.url === '/api/status') {
+          const traceIds = new Set(store.spans.map((s) => s.trace_id));
+          const uptimeMs = Date.now() - store.startedAt;
+          const totalRoutes = store.routes.pages.length + store.routes.apiRoutes.length;
+          res.writeHead(200);
+          res.end(JSON.stringify({
+            uptime_ms: uptimeMs,
+            total_routes: totalRoutes,
+            pages: store.routes.pages.length,
+            api_routes: store.routes.apiRoutes.length,
+            total_spans: store.spans.length,
+            total_traces: traceIds.size,
+            active_issues: store.analysisEngine.activeIssueCount,
+            error_count: store.events.filter((e) => e.type === 'trace_error').length,
+          }));
+          return;
+        }
+
+        // GET /api/issues
+        if (req.method === 'GET' && req.url === '/api/issues') {
+          const issues = store.analysisEngine.getActiveIssues();
+          res.writeHead(200);
+          res.end(JSON.stringify({ issues }));
+          return;
+        }
+
+        // GET /api/routes
+        if (req.method === 'GET' && req.url === '/api/routes') {
+          const allRoutes = [
+            ...store.routes.pages.map((r) => ({ path: r, type: 'page' as const })),
+            ...store.routes.apiRoutes.map((r) => ({ path: r, type: 'api' as const })),
+          ];
+          const routeData = allRoutes.map((route) => {
+            const lastCheck = store.previousResults.get(route.path);
+            const baseline = store.baselines.get(route.path);
+            let status: 'healthy' | 'error' | 'slow' | 'unknown' = 'unknown';
+            if (lastCheck) {
+              if (lastCheck.status > 0 && lastCheck.status < 400) {
+                status = 'healthy';
+                if (baseline && lastCheck.timeMs > 500 && lastCheck.timeMs > baseline * 3) {
+                  status = 'slow';
+                }
+              } else {
+                status = 'error';
+              }
+            }
+            return {
+              path: route.path,
+              type: route.type,
+              status,
+              last_status_code: lastCheck?.status ?? null,
+              last_time_ms: lastCheck?.timeMs ?? null,
+              baseline_ms: baseline ?? null,
+              error_text: lastCheck?.errorText ?? null,
+            };
+          });
+          res.writeHead(200);
+          res.end(JSON.stringify({ routes: routeData }));
+          return;
+        }
+
+        // GET /api/slow-routes
+        if (req.method === 'GET' && req.url === '/api/slow-routes') {
+          const slowRoutes: Array<Record<string, unknown>> = [];
+          for (const [route, baseline] of store.baselines) {
+            const lastCheck = store.previousResults.get(route);
+            if (!lastCheck || lastCheck.status === 0 || lastCheck.status >= 400) continue;
+            if (lastCheck.timeMs > 500 && lastCheck.timeMs > baseline * 3) {
+              // Find bottleneck span from recent traces for this route
+              const routeSpans = store.spans.filter((s) => {
+                const spanRoute = s.attributes['http.route'] || s.attributes['http.target'] || s.attributes['url.path'];
+                return spanRoute === route && s.kind === 'SERVER';
+              });
+              let bottleneck: { name: string; duration_ms: number } | null = null;
+              if (routeSpans.length > 0) {
+                const latestTrace = routeSpans[routeSpans.length - 1];
+                const traceSpans = store.spans
+                  .filter((s) => s.trace_id === latestTrace.trace_id && s.span_id !== latestTrace.span_id)
+                  .sort((a, b) => b.duration_ms - a.duration_ms);
+                if (traceSpans.length > 0) {
+                  bottleneck = { name: traceSpans[0].operation_name, duration_ms: traceSpans[0].duration_ms };
+                }
+              }
+              slowRoutes.push({
+                path: route,
+                current_ms: lastCheck.timeMs,
+                baseline_ms: baseline,
+                ratio: Math.round((lastCheck.timeMs / baseline) * 10) / 10,
+                bottleneck,
+              });
+            }
+          }
+          res.writeHead(200);
+          res.end(JSON.stringify({ slow_routes: slowRoutes }));
+          return;
+        }
+
+        // GET /api/route-traces?path=/api/foo&limit=5
+        if (req.method === 'GET' && req.url?.startsWith('/api/route-traces')) {
+          const urlObj = new URL(req.url, 'http://localhost');
+          const routePath = urlObj.searchParams.get('path') || '/';
+          const limit = parseInt(urlObj.searchParams.get('limit') || '5');
+          // Find SERVER spans for this route
+          const serverSpans = store.spans
+            .filter((s) => {
+              const spanRoute = s.attributes['http.route'] || s.attributes['http.target'] || s.attributes['url.path'];
+              return s.kind === 'SERVER' && spanRoute === routePath;
+            })
+            .sort((a, b) => b.start_time - a.start_time)
+            .slice(0, limit);
+          const traces = serverSpans.map((rootSpan) => {
+            const traceSpans = store.spans
+              .filter((s) => s.trace_id === rootSpan.trace_id)
+              .sort((a, b) => a.start_time - b.start_time);
+            return {
+              trace_id: rootSpan.trace_id,
+              method: rootSpan.attributes['http.method'] || rootSpan.attributes['http.request.method'] || '???',
+              route: routePath,
+              status_code: rootSpan.attributes['http.status_code'] || rootSpan.attributes['http.response.status_code'],
+              duration_ms: rootSpan.duration_ms,
+              timestamp: rootSpan.start_time,
+              spans: traceSpans.map((s) => ({
+                span_id: s.span_id,
+                parent_span_id: s.parent_span_id,
+                operation: s.operation_name,
+                kind: s.kind,
+                duration_ms: s.duration_ms,
+                status: s.status_code,
+                service: s.service_name,
+                attributes: s.attributes,
+              })),
+            };
+          });
+          res.writeHead(200);
+          res.end(JSON.stringify({ path: routePath, traces }));
           return;
         }
 

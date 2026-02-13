@@ -144,6 +144,17 @@ export class AnalysisEngine {
     return count;
   }
 
+  /** Get all active (unresolved) issues with full detail */
+  getActiveIssues(): AnalysisResult[] {
+    const results: AnalysisResult[] = [];
+    for (const issue of this.issues.values()) {
+      if (!issue.resolved) {
+        results.push(issue.result);
+      }
+    }
+    return results;
+  }
+
   /** Get all tracked issues (for session summary) */
   getSummary(): { total: number; active: number; resolved: number; byRule: Map<string, number> } {
     let active = 0;

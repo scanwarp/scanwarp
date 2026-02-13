@@ -60,6 +60,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.26.0
+        version: 1.26.0(zod@4.3.6)
       '@scanwarp/core':
         specifier: workspace:*
         version: link:../core
