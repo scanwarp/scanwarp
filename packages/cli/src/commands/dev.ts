@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawn, type ChildProcess } from 'child_process';
 import { createServer, type Server } from 'http';
+import { watch as chokidarWatch, type FSWatcher } from 'chokidar';
 import { detectProject, type DetectedProject } from '../detector.js';
 
 interface DevOptions {
@@ -44,6 +45,23 @@ interface MemoryStore {
   liveLogEnabled: boolean;
 }
 
+/** Stored result from checking a single route */
+interface RouteCheckResult {
+  route: string;
+  method: string;
+  status: number;
+  timeMs: number;
+  errorText?: string;
+}
+
+/** Maps a route path to its source file (for file-change → route mapping) */
+interface RouteFileMap {
+  /** file path → route path */
+  fileToRoute: Map<string, string>;
+  /** file path → 'page' | 'api' */
+  fileToType: Map<string, 'page' | 'api'>;
+}
+
 // ─── Main dev command ───
 
 export async function devCommand(options: DevOptions = {}) {
@@ -63,7 +81,11 @@ export async function devCommand(options: DevOptions = {}) {
   console.log(chalk.gray(`  Dev command: ${devCmd}\n`));
 
   // Step 3: Discover routes
-  const routes = discoverRoutes(detected, cwd);
+  const routeFileMap: RouteFileMap = {
+    fileToRoute: new Map(),
+    fileToType: new Map(),
+  };
+  const routes = discoverRoutes(detected, cwd, routeFileMap);
   if (routes.pages.length > 0 || routes.apiRoutes.length > 0) {
     console.log(
       chalk.green(`  Found ${routes.pages.length} pages, ${routes.apiRoutes.length} API routes`)
@@ -86,10 +108,17 @@ export async function devCommand(options: DevOptions = {}) {
 
   const child = startDevServer(devCmd, cwd, scanwarpPort, isNextJs);
 
+  // Track previous route check results for comparison
+  const previousResults = new Map<string, RouteCheckResult>();
+  let watcher: FSWatcher | undefined;
+
   // Handle cleanup
   const cleanup = () => {
     console.log(chalk.gray('\n\n  Shutting down...'));
 
+    if (watcher) {
+      watcher.close();
+    }
     if (child && !child.killed) {
       child.kill('SIGTERM');
     }
@@ -105,6 +134,7 @@ export async function devCommand(options: DevOptions = {}) {
 
   child.on('exit', (code) => {
     console.log(chalk.gray(`\n  Dev server exited with code ${code}`));
+    if (watcher) watcher.close();
     scanwarpServer.close();
     printSessionSummary(store);
     process.exit(code || 0);
@@ -116,7 +146,13 @@ export async function devCommand(options: DevOptions = {}) {
       if (ready) {
         console.log(chalk.gray('\n─'.repeat(60)));
         console.log(chalk.bold.cyan('\n  Initial route check\n'));
-        await crawlRoutes(routes, devServerPort);
+        const initialResults = await crawlRoutes(routes, devServerPort);
+
+        // Store initial results for comparison
+        for (const r of initialResults) {
+          previousResults.set(r.route, r);
+        }
+
         console.log(chalk.gray('\n─'.repeat(60)));
         console.log('');
       }
@@ -124,6 +160,9 @@ export async function devCommand(options: DevOptions = {}) {
       // Server didn't start in time — that's fine, skip crawl
     });
   }
+
+  // Step 7: Start file watcher
+  watcher = startFileWatcher(cwd, routes, routeFileMap, previousResults, devServerPort);
 
   // Enable live request log
   store.liveLogEnabled = true;
@@ -197,7 +236,7 @@ interface DiscoveredRoutes {
   apiRoutes: string[];
 }
 
-function discoverRoutes(detected: DetectedProject, cwd: string): DiscoveredRoutes {
+function discoverRoutes(detected: DetectedProject, cwd: string, routeFileMap?: RouteFileMap): DiscoveredRoutes {
   const pages: string[] = [];
   const apiRoutes: string[] = [];
 
@@ -208,7 +247,7 @@ function discoverRoutes(detected: DetectedProject, cwd: string): DiscoveredRoute
       : path.join(cwd, 'app');
 
     if (fs.existsSync(appDir)) {
-      walkNextAppDir(appDir, appDir, pages, apiRoutes);
+      walkNextAppDir(appDir, appDir, pages, apiRoutes, routeFileMap);
     }
 
     // Next.js Pages Router
@@ -217,7 +256,7 @@ function discoverRoutes(detected: DetectedProject, cwd: string): DiscoveredRoute
       : path.join(cwd, 'pages');
 
     if (fs.existsSync(pagesDir)) {
-      walkNextPagesDir(pagesDir, pagesDir, pages, apiRoutes);
+      walkNextPagesDir(pagesDir, pagesDir, pages, apiRoutes, routeFileMap);
     }
   }
 
@@ -228,7 +267,8 @@ function walkNextAppDir(
   dir: string,
   baseDir: string,
   pages: string[],
-  apiRoutes: string[]
+  apiRoutes: string[],
+  routeFileMap?: RouteFileMap,
 ) {
   let entries: fs.Dirent[];
   try {
@@ -243,15 +283,24 @@ function walkNextAppDir(
     const fullPath = path.join(dir, entry.name);
 
     if (entry.isDirectory()) {
-      walkNextAppDir(fullPath, baseDir, pages, apiRoutes);
+      walkNextAppDir(fullPath, baseDir, pages, apiRoutes, routeFileMap);
     } else if (entry.isFile()) {
       const relativePath = path.relative(baseDir, dir);
       const route = '/' + relativePath.replace(/\\/g, '/');
+      const normalizedRoute = route === '/.' ? '/' : route;
 
       if (entry.name.match(/^route\.(ts|tsx|js|jsx)$/)) {
-        apiRoutes.push(route === '/.' ? '/' : route);
+        apiRoutes.push(normalizedRoute);
+        if (routeFileMap) {
+          routeFileMap.fileToRoute.set(fullPath, normalizedRoute);
+          routeFileMap.fileToType.set(fullPath, 'api');
+        }
       } else if (entry.name.match(/^page\.(ts|tsx|js|jsx)$/)) {
-        pages.push(route === '/.' ? '/' : route);
+        pages.push(normalizedRoute);
+        if (routeFileMap) {
+          routeFileMap.fileToRoute.set(fullPath, normalizedRoute);
+          routeFileMap.fileToType.set(fullPath, 'page');
+        }
       }
     }
   }
@@ -261,7 +310,8 @@ function walkNextPagesDir(
   dir: string,
   baseDir: string,
   pages: string[],
-  apiRoutes: string[]
+  apiRoutes: string[],
+  routeFileMap?: RouteFileMap,
 ) {
   let entries: fs.Dirent[];
   try {
@@ -276,7 +326,7 @@ function walkNextPagesDir(
     const fullPath = path.join(dir, entry.name);
 
     if (entry.isDirectory()) {
-      walkNextPagesDir(fullPath, baseDir, pages, apiRoutes);
+      walkNextPagesDir(fullPath, baseDir, pages, apiRoutes, routeFileMap);
     } else if (entry.isFile() && entry.name.match(/\.(ts|tsx|js|jsx)$/)) {
       const relativePath = path.relative(baseDir, fullPath);
       const routePath = '/' + relativePath
@@ -285,10 +335,16 @@ function walkNextPagesDir(
         .replace(/\/index$/, '')
         || '/';
 
-      if (relativePath.startsWith('api/') || relativePath.startsWith('api\\')) {
+      const isApi = relativePath.startsWith('api/') || relativePath.startsWith('api\\');
+      if (isApi) {
         apiRoutes.push(routePath);
       } else {
         pages.push(routePath);
+      }
+
+      if (routeFileMap) {
+        routeFileMap.fileToRoute.set(fullPath, routePath);
+        routeFileMap.fileToType.set(fullPath, isApi ? 'api' : 'page');
       }
     }
   }
@@ -654,7 +710,7 @@ async function waitForServer(port: number, timeoutMs: number): Promise<boolean> 
 
 // ─── Route crawling ───
 
-async function crawlRoutes(routes: DiscoveredRoutes, port: number) {
+async function crawlRoutes(routes: DiscoveredRoutes, port: number): Promise<RouteCheckResult[]> {
   const allGetRoutes = [
     ...routes.pages,
     ...routes.apiRoutes.filter((r) => !r.includes('[') || !r.includes(']')),
@@ -667,21 +723,22 @@ async function crawlRoutes(routes: DiscoveredRoutes, port: number) {
 
   if (staticRoutes.length === 0) {
     console.log(chalk.gray('  No static routes to check (all routes are dynamic)\n'));
-    return;
+    return [];
   }
 
   console.log(chalk.bold('  Initial scan:\n'));
 
-  interface CrawlResult { route: string; status: number; timeMs: number; errorText?: string }
-  interface CrawlError { route: string; error: string }
+  const checkResults = await checkRoutes(staticRoutes, port);
+  printRouteResults(checkResults);
 
-  const results: CrawlResult[] = [];
-  const errors: CrawlError[] = [];
+  return checkResults;
+}
 
-  // Compute the max route length for alignment
-  const maxRouteLen = Math.max(...staticRoutes.map((r) => `GET ${r}`.length));
+/** Hit each route with GET and return results */
+async function checkRoutes(routes: string[], port: number): Promise<RouteCheckResult[]> {
+  const results: RouteCheckResult[] = [];
 
-  for (const route of staticRoutes) {
+  for (const route of routes) {
     try {
       const start = Date.now();
       const controller = new AbortController();
@@ -700,12 +757,10 @@ async function crawlRoutes(routes: DiscoveredRoutes, port: number) {
       if (response.status >= 400) {
         try {
           const text = await response.text();
-          // Try JSON first
           try {
             const json = JSON.parse(text);
             errorText = json.error || json.message || undefined;
           } catch {
-            // Use first line of plain text, truncated
             const firstLine = text.split('\n')[0];
             if (firstLine && firstLine.length > 0) {
               errorText = firstLine.length > 60 ? firstLine.substring(0, 60) + '...' : firstLine;
@@ -716,40 +771,69 @@ async function crawlRoutes(routes: DiscoveredRoutes, port: number) {
         }
       }
 
-      results.push({ route, status: response.status, timeMs, errorText });
+      results.push({ route, method: 'GET', status: response.status, timeMs, errorText });
     } catch (err) {
-      errors.push({
+      results.push({
         route,
-        error: err instanceof Error ? err.message : String(err),
+        method: 'GET',
+        status: 0,
+        timeMs: 0,
+        errorText: err instanceof Error ? err.message : String(err),
       });
     }
   }
 
-  // Print results with aligned columns
+  return results;
+}
+
+/** Print route check results with aligned columns */
+function printRouteResults(results: RouteCheckResult[], previousResults?: Map<string, RouteCheckResult>) {
+  if (results.length === 0) return;
+
+  const maxRouteLen = Math.max(...results.map((r) => `${r.method} ${r.route}`.length));
+
   for (const r of results) {
-    const isOk = r.status < 400;
+    const isOk = r.status > 0 && r.status < 400;
     const icon = isOk ? chalk.green('✓') : chalk.red('✗');
-    const label = `GET ${r.route}`;
+    const label = `${r.method} ${r.route}`;
     const padded = label.padEnd(maxRouteLen + 2);
     const timeStr = `${r.timeMs}ms`.padStart(6);
     const timeColor = r.timeMs > 1000 ? chalk.yellow(timeStr) : chalk.gray(timeStr);
-    const statusStr = isOk ? '' : `  ${chalk.red(String(r.status))}`;
-    const errStr = r.errorText ? `  ${chalk.gray(r.errorText)}` : '';
 
-    console.log(`   ${icon} ${padded} ${timeColor}${statusStr}${errStr}`);
-  }
+    const statusStr = r.status === 0 ? '' : (isOk ? '' : `  ${chalk.red(String(r.status))}`);
+    const errStr = (!isOk && r.errorText) ? `  ${chalk.gray(r.errorText)}` : '';
 
-  for (const e of errors) {
-    const label = `GET ${e.route}`;
-    const padded = label.padEnd(maxRouteLen + 2);
-    console.log(`   ${chalk.red('✗')} ${padded} ${chalk.gray('  0ms')}  ${chalk.gray(e.error)}`);
+    // Change indicator compared to previous results
+    let changeIndicator = '';
+    if (previousResults) {
+      const prev = previousResults.get(r.route);
+      if (prev) {
+        const prevOk = prev.status > 0 && prev.status < 400;
+        if (!prevOk && isOk) {
+          changeIndicator = `  ${chalk.green('FIXED')}`;
+        } else if (prevOk && !isOk) {
+          changeIndicator = `  ${chalk.red('BROKE')}`;
+        } else if (prev.status !== r.status) {
+          changeIndicator = `  ${chalk.yellow(`${prev.status}→${r.status}`)}`;
+        } else if (Math.abs(r.timeMs - prev.timeMs) > 100) {
+          const delta = r.timeMs - prev.timeMs;
+          const sign = delta > 0 ? '+' : '';
+          changeIndicator = `  ${chalk.gray(`${sign}${delta}ms`)}`;
+        }
+      } else {
+        changeIndicator = `  ${chalk.cyan('NEW')}`;
+      }
+    }
+
+    console.log(`   ${icon} ${padded} ${timeColor}${statusStr}${errStr}${changeIndicator}`);
   }
 
   // Summary
-  const okCount = results.filter((r) => r.status < 400).length;
-  const errCount = results.filter((r) => r.status >= 400).length + errors.length;
-  const avgTime = results.length > 0
-    ? Math.round(results.reduce((sum, r) => sum + r.timeMs, 0) / results.length)
+  const okCount = results.filter((r) => r.status > 0 && r.status < 400).length;
+  const errCount = results.filter((r) => r.status === 0 || r.status >= 400).length;
+  const validResults = results.filter((r) => r.status > 0);
+  const avgTime = validResults.length > 0
+    ? Math.round(validResults.reduce((sum, r) => sum + r.timeMs, 0) / validResults.length)
     : 0;
 
   console.log('');
@@ -758,6 +842,93 @@ async function crawlRoutes(routes: DiscoveredRoutes, port: number) {
       `   ${okCount} ok, ${errCount} errors, avg ${avgTime}ms`
     )
   );
+}
+
+// ─── File watcher ───
+
+function startFileWatcher(
+  cwd: string,
+  routes: DiscoveredRoutes,
+  routeFileMap: RouteFileMap,
+  previousResults: Map<string, RouteCheckResult>,
+  devServerPort: number,
+): FSWatcher {
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingFiles = new Set<string>();
+
+  const watcher = chokidarWatch(
+    ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx', '**/*.mjs'],
+    {
+      cwd,
+      ignored: ['**/node_modules/**', '**/.next/**', '**/.git/**', '**/dist/**', '**/build/**'],
+      ignoreInitial: true,
+    }
+  );
+
+  watcher.on('change', (relativePath) => {
+    const fullPath = path.resolve(cwd, relativePath);
+    pendingFiles.add(fullPath);
+
+    // Debounce — wait 1 second after the last change
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => {
+      const changedFiles = new Set(pendingFiles);
+      pendingFiles = new Set();
+
+      const affectedRoutes = resolveAffectedRoutes(changedFiles, routes, routeFileMap);
+      if (affectedRoutes.length === 0) return;
+
+      console.log('');
+      console.log(chalk.gray('─'.repeat(60)));
+      const fileNames = [...changedFiles].map((f) => path.relative(cwd, f)).join(', ');
+      console.log(chalk.bold.cyan(`\n  File changed: ${fileNames}\n`));
+      console.log(chalk.bold(`  Re-checking ${affectedRoutes.length} route${affectedRoutes.length > 1 ? 's' : ''}:\n`));
+
+      const newResults = await checkRoutes(affectedRoutes, devServerPort);
+      printRouteResults(newResults, previousResults);
+
+      // Update previous results
+      for (const r of newResults) {
+        previousResults.set(r.route, r);
+      }
+
+      console.log(chalk.gray('\n─'.repeat(60)));
+      console.log('');
+    }, 1000);
+  });
+
+  return watcher;
+}
+
+/** Map changed files to affected routes */
+function resolveAffectedRoutes(
+  changedFiles: Set<string>,
+  routes: DiscoveredRoutes,
+  routeFileMap: RouteFileMap,
+): string[] {
+  const affected = new Set<string>();
+  let hasNonRouteFile = false;
+
+  for (const file of changedFiles) {
+    const route = routeFileMap.fileToRoute.get(file);
+    if (route) {
+      // Direct match — this file IS a route file
+      affected.add(route);
+    } else {
+      // Not a known route file — could be a utility, component, etc.
+      hasNonRouteFile = true;
+    }
+  }
+
+  // For non-route files, re-check all API routes (they're more likely to be affected by shared code)
+  if (hasNonRouteFile) {
+    const staticApiRoutes = routes.apiRoutes.filter((r) => !r.includes('['));
+    for (const route of staticApiRoutes) {
+      affected.add(route);
+    }
+  }
+
+  return [...affected];
 }
 
 // ─── Session summary ───
