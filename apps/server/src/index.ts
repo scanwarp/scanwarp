@@ -1,5 +1,8 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
+import path from 'path';
+import fs from 'fs';
 import type { WebhookPayload, VercelLogDrainPayload } from '@scanwarp/core';
 import { createDatabase } from './db/index.js';
 import { MonitorRunner } from './monitoring/MonitorRunner.js';
@@ -20,6 +23,25 @@ const fastify = Fastify({
 });
 
 fastify.register(cors);
+
+// Serve the dashboard SPA if the built files exist
+const dashboardDir = path.join(__dirname, 'dashboard');
+if (fs.existsSync(dashboardDir) && fs.existsSync(path.join(dashboardDir, 'index.html'))) {
+  fastify.register(fastifyStatic, {
+    root: dashboardDir,
+    prefix: '/',
+    decorateReply: false,
+    // Don't interfere with API routes
+    wildcard: false,
+  });
+
+  // SPA fallback: serve index.html for any non-API, non-file route
+  fastify.setNotFoundHandler(async (_request, reply) => {
+    return reply.sendFile('index.html', dashboardDir);
+  });
+
+  console.log('Dashboard enabled — serving from', dashboardDir);
+}
 
 // Add raw body support for webhook signature verification
 fastify.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {

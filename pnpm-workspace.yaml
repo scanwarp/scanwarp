@@ -1,6 +1,7 @@
 packages:
   - packages/*
   - apps/*
+  - apps/server/src/dashboard
 
 onlyBuiltDependencies:
   - better-sqlite3
