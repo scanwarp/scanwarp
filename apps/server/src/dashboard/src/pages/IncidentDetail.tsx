@@ -1,7 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api';
 import { Badge } from '../components/Badge';
-import { Waterfall } from '../components/Waterfall';
+import { TraceWaterfall } from '../components/TraceWaterfall';
 import { useFetch, timeAgo } from '../hooks';
 
 export function IncidentDetail() {
@@ -110,9 +110,9 @@ export function IncidentDetail() {
       {/* Trace Waterfall */}
       {spans.length > 0 && (
         <section>
-          <h2 className="font-semibold text-gray-300 mb-3">Trace Waterfall ({spans.length} spans)</h2>
+          <h2 className="font-semibold text-gray-300 mb-3">Trace Waterfall</h2>
           <div className="bg-gray-900 rounded-lg border border-gray-800 p-4 overflow-x-auto">
-            <Waterfall spans={spans} />
+            <TraceWaterfall spans={spans} />
           </div>
         </section>
       )}
