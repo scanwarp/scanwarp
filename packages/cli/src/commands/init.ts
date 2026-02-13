@@ -88,8 +88,22 @@ export async function initCommand(options: InitOptions = {}) {
 
   if (!isConnected) {
     serverSpinner.fail(`Could not connect to ${serverUrl}`);
-    console.log(chalk.yellow('\n⚠ Make sure the ScanWarp server is running.'));
-    console.log(chalk.gray('  Run: cd apps/server && pnpm dev\n'));
+
+    if (options.server) {
+      // User explicitly provided a server URL — just report the error
+      console.log(chalk.yellow('\n⚠ Make sure the ScanWarp server is running at that URL.\n'));
+    } else {
+      // No server specified, localhost failed — suggest deployment options
+      console.log(chalk.yellow('\n⚠ No local ScanWarp server found.\n'));
+      console.log(chalk.bold('  Option 1: Deploy a hosted server (60 seconds)\n'));
+      console.log(chalk.gray('    Railway: https://railway.com/template/scanwarp'));
+      console.log(chalk.gray('    Render:  https://render.com/deploy?repo=https://github.com/scanwarp/scanwarp\n'));
+      console.log(chalk.gray('    Then run:'));
+      console.log(chalk.white('    npx scanwarp init --server https://your-server-url.up.railway.app\n'));
+      console.log(chalk.bold('  Option 2: Run locally\n'));
+      console.log(chalk.gray('    docker compose up -d'));
+      console.log(chalk.gray('    npx scanwarp init --server http://localhost:3000\n'));
+    }
     process.exit(1);
   }
   serverSpinner.succeed(`Connected to ${serverUrl}`);

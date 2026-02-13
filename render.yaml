@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: scanwarp-server
+    runtime: docker
+    dockerfilePath: ./apps/server/Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "3000"
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: scanwarp-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: scanwarp-db
+          property: port
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: scanwarp-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: scanwarp-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: scanwarp-db
+          property: password
+      - key: DATABASE_URL
+        fromDatabase:
+          name: scanwarp-db
+          property: connectionString
+
+databases:
+  - name: scanwarp-db
+    plan: starter
+    databaseName: scanwarp
+    postgresMajorVersion: "16"

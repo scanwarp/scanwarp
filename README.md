@@ -18,6 +18,14 @@ npx scanwarp init
 🎉 Done! Monitoring in 30 seconds.
 ```
 
+## Deploy
+
+Get a hosted ScanWarp server in 60 seconds. Then run `npx scanwarp init --server <your-url>` to connect your app.
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/template/scanwarp?referralCode=scanwarp)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/scanwarp/scanwarp)
+
 ## What It Does
 
 - **Monitors your app** — Health checks every 60s, ingests logs from Vercel/Stripe/GitHub

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "apps/server/Dockerfile"
+  },
+  "deploy": {
+    "startCommand": "node dist/index.js",
+    "healthcheckPath": "/health",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  },
+  "services": {
+    "scanwarp-server": {
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "apps/server/Dockerfile"
+      },
+      "deploy": {
+        "healthcheckPath": "/health",
+        "restartPolicyType": "ON_FAILURE"
+      },
+      "networking": {
+        "servicePort": 3000
+      },
+      "variables": {
+        "PORT": "3000",
+        "POSTGRES_HOST": {
+          "referenceService": "postgres",
+          "referenceVariable": "PGHOST"
+        },
+        "POSTGRES_PORT": {
+          "referenceService": "postgres",
+          "referenceVariable": "PGPORT"
+        },
+        "POSTGRES_DB": {
+          "referenceService": "postgres",
+          "referenceVariable": "PGDATABASE"
+        },
+        "POSTGRES_USER": {
+          "referenceService": "postgres",
+          "referenceVariable": "PGUSER"
+        },
+        "POSTGRES_PASSWORD": {
+          "referenceService": "postgres",
+          "referenceVariable": "PGPASSWORD"
+        },
+        "DATABASE_URL": {
+          "referenceService": "postgres",
+          "referenceVariable": "DATABASE_URL"
+        }
+      }
+    },
+    "postgres": {
+      "plugin": "postgresql"
+    }
+  }
+}
