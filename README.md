@@ -2,7 +2,7 @@
 
 **Your AI writes your code. ScanWarp keeps it running.**
 
-Open-source monitoring for AI-built apps. When something breaks in production, ScanWarp diagnoses the issue and feeds the fix directly to your AI coding tool. No DevOps knowledge required.
+Open-source monitoring for AI-built apps. Like Datadog, but your AI coding tool can read the diagnosis and fix the issue directly — no DevOps knowledge required.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -13,118 +13,83 @@ Open-source monitoring for AI-built apps. When something breaks in production, S
        │                             │
        ▼                             │
     Build ──→ Monitor ──→ Diagnose ──→ Fix
-       │         │           │         │
-    Cursor    ScanWarp     Claude    Cursor
-    Claude    watches     explains   reads fix
-    Code     everything   why it     via MCP
-              24/7        broke      and applies
 ```
 
-1. **Build** — You build your app with Cursor, Claude Code, or any AI coding tool
-2. **Monitor** — ScanWarp watches your app: health checks, request traces, payment webhooks, CI pipelines, provider outages
-3. **Diagnose** — Claude AI analyzes the issue in plain English, pinpoints the bottleneck, and generates a fix prompt
-4. **Fix** — Your AI coding tool reads the diagnosis and fix prompt directly via MCP — no copy-pasting. ScanWarp verifies the fix landed.
+1. **Build** — You ship with Cursor, Claude Code, or any AI coding tool
+2. **Monitor** — ScanWarp watches health, traces, payments, CI, and provider outages
+3. **Diagnose** — Claude AI explains what broke and generates a fix prompt
+4. **Fix** — Your AI tool reads the fix via MCP and applies it. ScanWarp verifies it landed.
 
 The loop runs continuously. Every fix is monitored. Every new issue is diagnosed.
 
 ## Get Started
 
 ```bash
-npx scanwarp dev       # full flywheel running locally while you build
-npx scanwarp init      # same flywheel in production when you ship
+npx scanwarp dev       # full flywheel locally while you build
+npx scanwarp init      # same flywheel in production
 ```
 
-ScanWarp auto-detects your framework (Next.js, Remix, SvelteKit, Astro, Vue, Nuxt), hosting (Vercel, Railway, Render), and services (Stripe, Supabase, GitHub). Setup takes under a minute.
+Auto-detects your framework (Next.js, Remix, SvelteKit, Astro, Vue, Nuxt), hosting (Vercel, Railway, Render), and services (Stripe, Supabase, GitHub). Works with Cursor and Claude Code out of the box via MCP.
 
-## Build
+## Deploy
 
-Works with any AI coding tool that supports MCP:
+Get a hosted ScanWarp server, then run `npx scanwarp init --server <url>` to connect your app.
 
-- **Cursor** — auto-configured during `scanwarp init`
-- **Claude Code** — auto-configured during `scanwarp init`
-- **Any MCP client** — connect to `@scanwarp/mcp`
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/template/scanwarp?referralCode=scanwarp)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/scanwarp/scanwarp)
 
-Auto-detects your framework and installs zero-config OpenTelemetry tracing for HTTP, PostgreSQL, MySQL, Redis, Express, and Fastify.
+**Or self-host:**
 
-## Monitor
+```bash
+npx scanwarp server                              # SQLite, zero deps
+docker compose up -d                             # Docker + Postgres
+```
 
-| Source | What ScanWarp captures |
-|--------|----------------------|
-| **Health checks** | HTTP monitoring every 60s with response time tracking |
+## How It Works
+
+### Monitor
+
+| Source | What it captures |
+|--------|-----------------|
+| **Health checks** | HTTP monitoring every 60s, response time tracking |
 | **Vercel** | Production errors via log drain |
 | **Stripe** | Payment failures, expired checkouts, subscription cancellations |
 | **GitHub** | Failed CI workflows, Dependabot alerts, code scanning alerts |
 | **Supabase** | Database health, connection pool utilization |
-| **OpenTelemetry** | Full request traces: HTTP, databases, Redis — zero config |
+| **OpenTelemetry** | Request traces — HTTP, databases, Redis — zero config |
 | **Provider status** | Vercel, Stripe, Supabase, GitHub, Cloudflare, Railway, AWS, Resend |
 
-During development, `scanwarp dev` also runs:
-- Route discovery and live request analysis
-- N+1 query detection, slow query alerts, schema drift detection
-- File watcher that re-checks routes when you save
+During development, `scanwarp dev` also detects N+1 queries, slow queries, schema drift, and re-analyzes routes on file save.
 
-## Diagnose
+### Diagnose
 
-When ScanWarp detects an anomaly — a new error type, a traffic spike, a slow trace — it calls Claude AI with the full context: events, request traces, and provider status.
+When ScanWarp detects an anomaly — a new error type, a traffic spike, a slow trace — Claude AI analyzes the full context and produces:
 
-The diagnosis includes:
 - **Root cause** in plain English — no jargon, no raw stack traces
-- **Bottleneck identification** from OpenTelemetry traces — the exact operation that failed or is slow
-- **Provider awareness** — if Vercel or Stripe is having an outage, ScanWarp says "this is a provider issue, not your code" and skips code fix suggestions
-- **Fix prompt** designed for AI coding tools — specific files, specific changes, how to test
+- **Bottleneck ID** from OpenTelemetry traces — the exact span that failed or is slow
+- **Provider awareness** — "Vercel is down, this isn't your code"
+- **Fix prompt** for AI coding tools — specific files, specific changes, how to test
 
-## Fix
+### Fix
 
-Your AI coding tool connects to ScanWarp via MCP and can directly access:
+Your AI coding tool connects to ScanWarp via MCP:
 
 | MCP Tool | What it provides |
 |----------|-----------------|
 | `get_app_status` | Overall health: monitors, incidents, providers |
 | `get_incidents` | Open incidents with AI diagnosis |
-| `get_fix_prompt` | The fix prompt, ready to execute |
+| `get_fix_prompt` | Ready-to-execute fix prompt |
 | `get_trace_detail` | Full request waterfall with span-level detail |
 | `get_recent_traces` | Latest OpenTelemetry traces |
-| `get_incident_detail` | Complete incident: root cause, timeline, fix |
+| `get_incident_detail` | Root cause, timeline, and fix |
 | `get_events` | Recent events with filtering |
-| `resolve_incident` | Close the loop: mark incident as resolved |
+| `resolve_incident` | Mark incident resolved — close the loop |
 
-Your AI tool sees what broke and knows how to fix it — without you leaving your editor.
-
-For team awareness, ScanWarp also sends notifications to **Discord** and **Slack** with the full diagnosis, fix prompt, and a "Provider Issue" badge when the problem is upstream.
+Your AI tool sees what broke and how to fix it — without you leaving your editor. Discord and Slack notifications keep the team in the loop.
 
 ## Dashboard
 
-Built-in web dashboard at your server URL:
-
-- **Overview** — Monitor health, open incidents, recent errors at a glance
-- **Monitors** — Health checks with status and response time history
-- **Events** — Filterable stream from all sources
-- **Incidents** — AI diagnosis with root cause, suggested fix, and fix prompt
-- **Traces** — Request waterfall: color-coded spans, click-to-expand details, bottleneck highlighting
-
-## Deploy
-
-**Self-host with SQLite (zero dependencies):**
-
-```bash
-npx scanwarp server
-npx scanwarp init --server http://localhost:3000
-```
-
-Data at `~/.scanwarp/scanwarp.db`. No Docker, no Postgres.
-
-**One-click cloud:**
-
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/template/scanwarp?referralCode=scanwarp)
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/scanwarp/scanwarp)
-
-**Docker + Postgres:**
-
-```bash
-docker compose up -d
-npx scanwarp init --server http://localhost:3000
-```
+Built-in web UI: Overview, Monitors, Events, Incidents (with AI diagnosis), and Traces (with waterfall visualization and bottleneck highlighting).
 
 ## Reference
 
@@ -132,23 +97,23 @@ npx scanwarp init --server http://localhost:3000
 
 | Command | Description |
 |---------|-------------|
-| `scanwarp dev` | Run your app with the full monitoring flywheel locally |
-| `scanwarp init` | Connect production app to your ScanWarp server |
+| `scanwarp dev` | Run the full monitoring flywheel locally |
+| `scanwarp init` | Connect a production app to your ScanWarp server |
 | `scanwarp server` | Self-host the server with SQLite |
 | `scanwarp status` | Check monitor health and active incidents |
-| `scanwarp events` | View events (`--follow`, `--type`, `--source`) |
+| `scanwarp events` | Stream events (`--follow`, `--type`, `--source`) |
 
 **Packages:**
 
-| Package | What it does |
+| Package | Description |
 |---------|-------------|
-| `packages/cli` | CLI: `dev`, `init`, `server`, `status`, `events` |
-| `packages/core` | AI diagnoser (Claude), event correlator, shared types |
+| `packages/cli` | CLI tool |
+| `packages/core` | AI diagnoser, event correlator, shared types |
 | `packages/instrument` | Zero-config OpenTelemetry auto-instrumentation |
 | `packages/mcp` | MCP server for Cursor and Claude Code |
-| `apps/server` | Fastify server: REST API, dashboard, monitoring engine |
+| `apps/server` | Fastify server: API, dashboard, monitoring engine |
 
-**Key environment variables:**
+**Environment variables:**
 
 | Variable | Description |
 |----------|-------------|
@@ -159,7 +124,7 @@ npx scanwarp init --server http://localhost:3000
 | `GITHUB_WEBHOOK_SECRET` | GitHub webhook verification |
 | `SUPABASE_PROJECT_REF` | Supabase project reference |
 | `SCANWARP_SERVER` | Server URL for instrumentation |
-| `SCANWARP_PROJECT_ID` | Project identifier for instrumentation |
+| `SCANWARP_PROJECT_ID` | Project identifier |
 
 ## Community
 
