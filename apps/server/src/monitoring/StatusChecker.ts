@@ -1,4 +1,4 @@
-import type postgres from 'postgres';
+import type { Database } from '../db/index.js';
 
 interface ProviderStatusPage {
   name: string;
@@ -90,12 +90,12 @@ const STATUS_PAGES: ProviderStatusPage[] = [
 ];
 
 export class StatusChecker {
-  private sql: postgres.Sql;
+  private db: Database;
   private intervalId?: NodeJS.Timeout;
   private isRunning = false;
 
-  constructor(sql: postgres.Sql) {
-    this.sql = sql;
+  constructor(db: Database) {
+    this.db = db;
   }
 
   async start() {
@@ -154,15 +154,7 @@ export class StatusChecker {
       const { status, details } = provider.parser(data);
 
       // Update provider_status table
-      await this.sql`
-        INSERT INTO provider_status (provider, status, last_checked_at, details)
-        VALUES (${provider.name}, ${status}, NOW(), ${details || null})
-        ON CONFLICT (provider)
-        DO UPDATE SET
-          status = EXCLUDED.status,
-          last_checked_at = EXCLUDED.last_checked_at,
-          details = EXCLUDED.details
-      `;
+      await this.db.upsertProviderStatus(provider.name, status, details || null);
 
       // If status is not operational, create an event
       if (status !== 'operational') {
@@ -181,66 +173,30 @@ export class StatusChecker {
     details?: string
   ) {
     // Check if we already have a recent event for this provider
-    const recentEvents = await this.sql`
-      SELECT id FROM events
-      WHERE source = 'provider-status'
-        AND raw_data->>'provider' = ${provider}
-        AND created_at > NOW() - INTERVAL '10 minutes'
-      LIMIT 1
-    `;
+    const hasRecent = await this.db.hasRecentProviderEvent(provider);
 
-    if (recentEvents.length > 0) {
-      // Don't spam events
-      return;
-    }
+    if (hasRecent) return;
 
-    const projectId = await this.getOrCreateProject();
+    const { id: projectId } = await this.db.getOrCreateProject('provider-status');
 
     const message =
       status === 'outage'
         ? `${provider} is experiencing an outage`
         : `${provider} is experiencing degraded performance`;
 
-    await this.sql`
-      INSERT INTO events (
-        project_id, type, source, message, raw_data, severity, created_at
-      ) VALUES (
-        ${projectId},
-        'error',
-        'provider-status',
-        ${message},
-        ${JSON.stringify({ provider, status, details })},
-        ${status === 'outage' ? 'critical' : 'high'},
-        NOW()
-      )
-    `;
+    await this.db.createEvent({
+      project_id: projectId,
+      type: 'error',
+      source: 'provider-status',
+      message,
+      raw_data: { provider, status, details },
+      severity: status === 'outage' ? 'critical' : 'high',
+    });
 
     console.log(`Provider status event created: ${message}`);
   }
 
-  private async getOrCreateProject(): Promise<string> {
-    const projectName = 'provider-status';
-
-    const existing = await this.sql<Array<{ id: string }>>`
-      SELECT id FROM projects WHERE name = ${projectName}
-    `;
-
-    if (existing.length > 0) {
-      return existing[0].id;
-    }
-
-    const created = await this.sql<Array<{ id: string }>>`
-      INSERT INTO projects (name) VALUES (${projectName}) RETURNING id
-    `;
-
-    return created[0].id;
-  }
-
   async getProviderStatuses() {
-    return await this.sql`
-      SELECT provider, status, last_checked_at, details
-      FROM provider_status
-      ORDER BY provider
-    `;
+    return await this.db.getProviderStatuses();
   }
 }

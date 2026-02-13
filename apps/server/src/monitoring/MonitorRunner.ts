@@ -1,4 +1,4 @@
-import type postgres from 'postgres';
+import type { Database } from '../db/index.js';
 import type { Monitor, Event } from '@scanwarp/core';
 
 interface CheckResult {
@@ -9,12 +9,12 @@ interface CheckResult {
 }
 
 export class MonitorRunner {
-  private sql: postgres.Sql;
+  private db: Database;
   private intervalId?: NodeJS.Timeout;
   private isRunning = false;
 
-  constructor(sql: postgres.Sql) {
-    this.sql = sql;
+  constructor(db: Database) {
+    this.db = db;
   }
 
   async start() {
@@ -62,13 +62,11 @@ export class MonitorRunner {
   }
 
   private async loadMonitors(): Promise<Monitor[]> {
-    const rows = await this.sql<Monitor[]>`
-      SELECT * FROM monitors
-      ORDER BY created_at DESC
-    `;
+    const rows = await this.db.getMonitors();
 
     return rows.map((row) => ({
       ...row,
+      status: row.status as Monitor['status'],
       last_checked_at: row.last_checked_at ? new Date(row.last_checked_at) : undefined,
       created_at: new Date(row.created_at),
     }));
@@ -79,11 +77,7 @@ export class MonitorRunner {
 
     // Update monitor status and last_checked_at
     const newStatus = result.success ? 'up' : 'down';
-    await this.sql`
-      UPDATE monitors
-      SET status = ${newStatus}, last_checked_at = NOW()
-      WHERE id = ${monitor.id}
-    `;
+    await this.db.updateMonitorStatus(monitor.id, newStatus);
 
     // Update statistics
     await this.updateStats(monitor.id, result);
@@ -124,45 +118,24 @@ export class MonitorRunner {
   }
 
   private async updateStats(monitorId: string, result: CheckResult) {
-    const existingStats = await this.sql<Array<{
-      monitor_id: string;
-      avg_response_time: number | null;
-      total_checks: number;
-      error_count: number;
-    }>>`
-      SELECT * FROM event_stats WHERE monitor_id = ${monitorId}
-    `;
+    const stats = await this.db.getEventStats(monitorId);
 
-    if (existingStats.length === 0) {
+    if (!stats) {
       // Create new stats
-      await this.sql`
-        INSERT INTO event_stats (
-          monitor_id, avg_response_time, total_checks, error_count, updated_at
-        ) VALUES (
-          ${monitorId},
-          ${result.responseTime},
-          1,
-          ${result.success ? 0 : 1},
-          NOW()
-        )
-      `;
+      await this.db.createEventStats(monitorId, result.responseTime, !result.success);
     } else {
       // Update existing stats with rolling average
-      const stats = existingStats[0];
       const totalChecks = stats.total_checks + 1;
       const currentAvg = stats.avg_response_time || 0;
       const newAvg = (currentAvg * stats.total_checks + result.responseTime) / totalChecks;
 
-      await this.sql`
-        UPDATE event_stats
-        SET
-          avg_response_time = ${newAvg},
-          total_checks = ${totalChecks},
-          error_count = ${stats.error_count + (result.success ? 0 : 1)},
-          ${!result.success ? this.sql`last_error_at = NOW(),` : this.sql``}
-          updated_at = NOW()
-        WHERE monitor_id = ${monitorId}
-      `;
+      await this.db.updateEventStats(
+        monitorId,
+        newAvg,
+        totalChecks,
+        stats.error_count + (result.success ? 0 : 1),
+        !result.success
+      );
     }
   }
 
@@ -193,14 +166,9 @@ export class MonitorRunner {
 
     // Check for slow response (3x higher than average)
     if (result.success) {
-      const stats = await this.sql<Array<{
-        avg_response_time: number | null;
-      }>>`
-        SELECT avg_response_time FROM event_stats WHERE monitor_id = ${monitor.id}
-      `;
+      const avgTime = await this.db.getAvgResponseTime(monitor.id);
 
-      if (stats.length > 0 && stats[0].avg_response_time) {
-        const avgTime = stats[0].avg_response_time;
+      if (avgTime) {
         if (result.responseTime > avgTime * 3) {
           events.push({
             type: 'slow',
@@ -213,25 +181,20 @@ export class MonitorRunner {
 
     // Create events in database
     for (const event of events) {
-      await this.sql`
-        INSERT INTO events (
-          project_id, monitor_id, type, source, message, raw_data, severity, created_at
-        ) VALUES (
-          ${monitor.project_id},
-          ${monitor.id},
-          ${event.type},
-          'monitor',
-          ${event.message},
-          ${JSON.stringify({
-            url: monitor.url,
-            responseTime: result.responseTime,
-            statusCode: result.statusCode,
-            error: result.error,
-          })},
-          ${event.severity},
-          NOW()
-        )
-      `;
+      await this.db.createEvent({
+        project_id: monitor.project_id,
+        monitor_id: monitor.id,
+        type: event.type,
+        source: 'monitor',
+        message: event.message,
+        raw_data: {
+          url: monitor.url,
+          responseTime: result.responseTime,
+          statusCode: result.statusCode,
+          error: result.error,
+        },
+        severity: event.severity,
+      });
 
       console.log(`Event created: ${event.type} - ${event.message}`);
     }

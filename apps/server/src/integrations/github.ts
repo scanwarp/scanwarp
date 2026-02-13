@@ -1,11 +1,11 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type postgres from 'postgres';
+import type { Database } from '../db/index.js';
 import crypto from 'crypto';
 import type { GitHubWebhookEvent, ProviderEvent } from '@scanwarp/core';
 
 export async function registerGitHubWebhook(
   fastify: FastifyInstance,
-  sql: postgres.Sql,
+  db: Database,
   webhookSecret?: string
 ) {
   fastify.post<{ Body: GitHubWebhookEvent }>(
@@ -56,21 +56,16 @@ export async function registerGitHubWebhook(
 
       try {
         const providerEvent = normalizeGitHubEvent(event, String(eventType));
-        const projectId = await getOrCreateProject(sql, 'github-default');
+        const { id: projectId } = await db.getOrCreateProject('github-default');
 
-        await sql`
-          INSERT INTO events (
-            project_id, type, source, message, raw_data, severity, created_at
-          ) VALUES (
-            ${projectId},
-            ${providerEvent.type},
-            ${providerEvent.source},
-            ${providerEvent.message},
-            ${JSON.stringify(providerEvent.raw_data)},
-            ${providerEvent.severity},
-            NOW()
-          )
-        `;
+        await db.createEvent({
+          project_id: projectId,
+          type: providerEvent.type,
+          source: providerEvent.source,
+          message: providerEvent.message,
+          raw_data: providerEvent.raw_data,
+          severity: providerEvent.severity,
+        });
 
         fastify.log.info(`GitHub event processed: ${eventType}`);
 
@@ -128,20 +123,4 @@ function normalizeGitHubEvent(event: GitHubWebhookEvent, eventType: string): Pro
       ...event,
     },
   };
-}
-
-async function getOrCreateProject(sql: postgres.Sql, name: string): Promise<string> {
-  const existing = await sql<Array<{ id: string }>>`
-    SELECT id FROM projects WHERE name = ${name}
-  `;
-
-  if (existing.length > 0) {
-    return existing[0].id;
-  }
-
-  const created = await sql<Array<{ id: string }>>`
-    INSERT INTO projects (name) VALUES (${name}) RETURNING id
-  `;
-
-  return created[0].id;
 }

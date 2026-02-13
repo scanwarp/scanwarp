@@ -1,15 +1,15 @@
-import type postgres from 'postgres';
+import type { Database } from '../db/index.js';
 import { Diagnoser, type Event, type Monitor, type Incident, type TraceSpan } from '@scanwarp/core';
 import { NotificationManager } from '../notifications/manager.js';
 
 export class IncidentService {
-  private sql: postgres.Sql;
+  private db: Database;
   private diagnoser: Diagnoser | null = null;
   private notificationManager: NotificationManager;
 
-  constructor(sql: postgres.Sql, apiKey?: string) {
-    this.sql = sql;
-    this.notificationManager = new NotificationManager(sql);
+  constructor(db: Database, apiKey?: string) {
+    this.db = db;
+    this.notificationManager = new NotificationManager(db);
 
     if (apiKey) {
       this.diagnoser = new Diagnoser({ apiKey });
@@ -25,19 +25,7 @@ export class IncidentService {
     }
 
     // Fetch the events
-    const events = await this.sql<Array<{
-      id: string;
-      project_id: string;
-      monitor_id: string | null;
-      type: string;
-      source: string;
-      message: string;
-      raw_data: Record<string, unknown> | null;
-      severity: string;
-      created_at: Date;
-    }>>`
-      SELECT * FROM events WHERE id = ANY(${eventIds})
-    `;
+    const events = await this.db.getEventsByIds(eventIds);
 
     if (events.length === 0) {
       throw new Error('No events found for the given IDs');
@@ -50,22 +38,9 @@ export class IncidentService {
     const severity = this.calculateSeverity(events);
 
     // Create the incident first (without diagnosis)
-    const incident = await this.sql<Array<{
-      id: string;
-    }>>`
-      INSERT INTO incidents (
-        project_id, events, status, severity, created_at
-      ) VALUES (
-        ${projectId},
-        ${JSON.stringify(eventIds)},
-        'open',
-        ${severity},
-        NOW()
-      )
-      RETURNING id
-    `;
+    const incident = await this.db.createIncident(projectId, eventIds, severity);
 
-    const incidentId = incident[0].id;
+    const incidentId = incident.id;
     console.log(`Created incident ${incidentId} for ${events.length} event(s)`);
 
     // Run AI diagnosis if available
@@ -114,46 +89,24 @@ export class IncidentService {
     // Fetch monitor info if available
     let monitor: Monitor | undefined;
     if (monitorId) {
-      const monitors = await this.sql<Array<{
-        id: string;
-        project_id: string;
-        url: string;
-        check_interval_seconds: number;
-        last_checked_at: Date | null;
-        status: string;
-        created_at: Date;
-      }>>`
-        SELECT * FROM monitors WHERE id = ${monitorId}
-      `;
+      const monitorRow = await this.db.getMonitorById(monitorId);
 
-      if (monitors.length > 0) {
-        const m = monitors[0];
+      if (monitorRow) {
         monitor = {
-          id: m.id,
-          project_id: m.project_id,
-          url: m.url,
-          check_interval_seconds: m.check_interval_seconds,
-          last_checked_at: m.last_checked_at || undefined,
-          status: m.status as Monitor['status'],
-          created_at: m.created_at,
+          id: monitorRow.id,
+          project_id: monitorRow.project_id,
+          url: monitorRow.url,
+          check_interval_seconds: monitorRow.check_interval_seconds,
+          last_checked_at: monitorRow.last_checked_at || undefined,
+          status: monitorRow.status as Monitor['status'],
+          created_at: monitorRow.created_at,
         };
       }
     }
 
     // Fetch recent history
     const recentHistory = monitorId
-      ? await this.sql<Array<{
-          created_at: Date;
-          type: string;
-          message: string;
-        }>>`
-          SELECT created_at, type, message
-          FROM events
-          WHERE monitor_id = ${monitorId}
-            AND created_at > NOW() - INTERVAL '24 hours'
-          ORDER BY created_at DESC
-          LIMIT 20
-        `
+      ? await this.db.getRecentEventHistory(monitorId)
       : [];
 
     // Fetch related traces from the spans table
@@ -172,16 +125,7 @@ export class IncidentService {
     });
 
     // Update the incident with diagnosis
-    await this.sql`
-      UPDATE incidents
-      SET
-        diagnosis_text = ${diagnosis.root_cause},
-        diagnosis_fix = ${diagnosis.suggested_fix},
-        fix_prompt = ${diagnosis.fix_prompt},
-        severity = ${diagnosis.severity},
-        status = 'investigating'
-      WHERE id = ${incidentId}
-    `;
+    await this.db.updateIncidentDiagnosis(incidentId, diagnosis);
 
     console.log(`Diagnosis completed for incident ${incidentId}`);
 
@@ -239,96 +183,29 @@ export class IncidentService {
       }
     }
 
-    let spans: Array<{
-      trace_id: string;
-      span_id: string;
-      parent_span_id: string | null;
-      service_name: string;
-      operation_name: string;
-      kind: string;
-      start_time: string;
-      duration_ms: number;
-      status_code: string | null;
-      status_message: string | null;
-      attributes: Record<string, unknown>;
-      events: Array<{ name: string; attributes?: Record<string, unknown> }>;
-    }>;
+    let spans;
 
     if (traceIds.length > 0) {
       // Direct trace lookup — fetch all spans for these trace IDs
-      spans = await this.sql`
-        SELECT trace_id, span_id, parent_span_id, service_name, operation_name,
-               kind, start_time, duration_ms, status_code, status_message,
-               attributes, events
-        FROM spans
-        WHERE trace_id = ANY(${traceIds})
-        ORDER BY start_time ASC
-        LIMIT 200
-      `;
+      spans = await this.db.getSpansByTraceIds(traceIds, 200);
     } else {
       // Time-window lookup — find root spans in the project near the incident
-      const rootSpans = await this.sql<Array<{ trace_id: string }>>`
-        SELECT DISTINCT trace_id
-        FROM spans
-        WHERE project_id = ${projectId}
-          AND parent_span_id IS NULL
-          AND start_time >= ${minTime}
-          AND start_time <= ${maxTime}
-        ORDER BY start_time DESC
-        LIMIT 10
-      `;
+      const rootTraceIds = await this.db.getDistinctTraceIdsInWindow(projectId, minTime, maxTime, 10);
 
-      if (rootSpans.length === 0) return [];
-
-      const rootTraceIds = rootSpans.map((r) => r.trace_id);
+      if (rootTraceIds.length === 0) return [];
 
       // If we have path hints, prefer traces that match them
       if (pathHints.length > 0) {
-        const matchingTraces = await this.sql<Array<{ trace_id: string }>>`
-          SELECT DISTINCT trace_id
-          FROM spans
-          WHERE trace_id = ANY(${rootTraceIds})
-            AND (
-              operation_name = ANY(${pathHints})
-              OR attributes->>'http.target' = ANY(${pathHints})
-              OR attributes->>'http.route' = ANY(${pathHints})
-              OR attributes->>'url.path' = ANY(${pathHints})
-            )
-        `;
+        const filteredIds = await this.db.getMatchingTraceIds(rootTraceIds, pathHints);
 
-        if (matchingTraces.length > 0) {
-          const filteredIds = matchingTraces.map((t) => t.trace_id);
-          spans = await this.sql`
-            SELECT trace_id, span_id, parent_span_id, service_name, operation_name,
-                   kind, start_time, duration_ms, status_code, status_message,
-                   attributes, events
-            FROM spans
-            WHERE trace_id = ANY(${filteredIds})
-            ORDER BY start_time ASC
-            LIMIT 200
-          `;
+        if (filteredIds.length > 0) {
+          spans = await this.db.getSpansByTraceIds(filteredIds, 200);
         } else {
           // No path match — use all root traces from the time window
-          spans = await this.sql`
-            SELECT trace_id, span_id, parent_span_id, service_name, operation_name,
-                   kind, start_time, duration_ms, status_code, status_message,
-                   attributes, events
-            FROM spans
-            WHERE trace_id = ANY(${rootTraceIds})
-            ORDER BY start_time ASC
-            LIMIT 200
-          `;
+          spans = await this.db.getSpansByTraceIds(rootTraceIds, 200);
         }
       } else {
-        spans = await this.sql`
-          SELECT trace_id, span_id, parent_span_id, service_name, operation_name,
-                 kind, start_time, duration_ms, status_code, status_message,
-                 attributes, events
-          FROM spans
-          WHERE trace_id = ANY(${rootTraceIds})
-          ORDER BY start_time ASC
-          LIMIT 200
-        `;
+        spans = await this.db.getSpansByTraceIds(rootTraceIds, 200);
       }
     }
 
@@ -340,7 +217,7 @@ export class IncidentService {
       service_name: s.service_name,
       operation_name: s.operation_name,
       kind: s.kind,
-      start_time: Number(s.start_time),
+      start_time: s.start_time,
       duration_ms: s.duration_ms,
       status_code: s.status_code,
       status_message: s.status_message,
@@ -362,11 +239,7 @@ export class IncidentService {
   }
 
   async resolveIncident(incidentId: string): Promise<void> {
-    await this.sql`
-      UPDATE incidents
-      SET status = 'resolved', resolved_at = NOW()
-      WHERE id = ${incidentId}
-    `;
+    await this.db.resolveIncident(incidentId);
 
     console.log(`Incident ${incidentId} resolved`);
 
@@ -382,26 +255,12 @@ export class IncidentService {
   }
 
   async getIncident(incidentId: string): Promise<Incident | null> {
-    const results = await this.sql<Array<{
-      id: string;
-      project_id: string;
-      events: string[];
-      status: string;
-      diagnosis_text: string | null;
-      diagnosis_fix: string | null;
-      severity: string;
-      fix_prompt: string | null;
-      created_at: Date;
-      resolved_at: Date | null;
-    }>>`
-      SELECT * FROM incidents WHERE id = ${incidentId}
-    `;
+    const row = await this.db.getIncident(incidentId);
 
-    if (results.length === 0) {
+    if (!row) {
       return null;
     }
 
-    const row = results[0];
     return {
       id: row.id,
       project_id: row.project_id,

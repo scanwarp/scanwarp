@@ -1,15 +1,15 @@
-import type postgres from 'postgres';
+import type { Database } from '../db/index.js';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 export class SupabasePoller {
-  private sql: postgres.Sql;
+  private db: Database;
   private supabase: SupabaseClient;
   private projectRef: string;
   private intervalId?: NodeJS.Timeout;
   private isRunning = false;
 
-  constructor(sql: postgres.Sql, projectRef: string, serviceKey: string) {
-    this.sql = sql;
+  constructor(db: Database, projectRef: string, serviceKey: string) {
+    this.db = db;
     this.projectRef = projectRef;
 
     // Create Supabase client
@@ -134,40 +134,18 @@ export class SupabasePoller {
     severity: 'low' | 'medium' | 'high' | 'critical';
     raw_data: Record<string, unknown>;
   }) {
-    const projectId = await this.getOrCreateProject();
+    const projectName = `supabase-${this.projectRef}`;
+    const { id: projectId } = await this.db.getOrCreateProject(projectName);
 
-    await this.sql`
-      INSERT INTO events (
-        project_id, type, source, message, raw_data, severity, created_at
-      ) VALUES (
-        ${projectId},
-        ${event.type},
-        'supabase',
-        ${event.message},
-        ${JSON.stringify(event.raw_data)},
-        ${event.severity},
-        NOW()
-      )
-    `;
+    await this.db.createEvent({
+      project_id: projectId,
+      type: event.type,
+      source: 'supabase',
+      message: event.message,
+      raw_data: event.raw_data,
+      severity: event.severity,
+    });
 
     console.log(`Supabase event created: ${event.message}`);
-  }
-
-  private async getOrCreateProject(): Promise<string> {
-    const projectName = `supabase-${this.projectRef}`;
-
-    const existing = await this.sql<Array<{ id: string }>>`
-      SELECT id FROM projects WHERE name = ${projectName}
-    `;
-
-    if (existing.length > 0) {
-      return existing[0].id;
-    }
-
-    const created = await this.sql<Array<{ id: string }>>`
-      INSERT INTO projects (name) VALUES (${projectName}) RETURNING id
-    `;
-
-    return created[0].id;
   }
 }

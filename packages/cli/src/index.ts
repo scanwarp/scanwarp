@@ -6,6 +6,7 @@ import { statusCommand } from './commands/status.js';
 import { logsCommand } from './commands/logs.js';
 import { devCommand } from './commands/dev.js';
 import { devMcpCommand } from './commands/dev-mcp.js';
+import { serverCommand } from './commands/server.js';
 import { config } from './config.js';
 
 const program = new Command();
@@ -90,6 +91,22 @@ program
     try {
       if (options.port) options.port = parseInt(options.port);
       await devMcpCommand(options);
+    } catch (error) {
+      console.error('Error:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('server')
+  .alias('serve')
+  .description('Start ScanWarp server locally with SQLite (no Docker required)')
+  .option('-p, --port <number>', 'Port to listen on', '3000')
+  .option('--db-path <path>', 'SQLite database file path')
+  .action(async (options) => {
+    try {
+      if (options.port) options.port = parseInt(options.port);
+      await serverCommand(options);
     } catch (error) {
       console.error('Error:', error instanceof Error ? error.message : error);
       process.exit(1);

@@ -1,4 +1,4 @@
-import type postgres from 'postgres';
+import type { Database } from '../db/index.js';
 import type { Event } from '@scanwarp/core';
 
 interface AnomalyResult {
@@ -8,10 +8,10 @@ interface AnomalyResult {
 }
 
 export class AnomalyDetector {
-  private sql: postgres.Sql;
+  private db: Database;
 
-  constructor(sql: postgres.Sql) {
-    this.sql = sql;
+  constructor(db: Database) {
+    this.db = db;
   }
 
   async analyzeEvent(event: Event): Promise<AnomalyResult> {
@@ -54,43 +54,17 @@ export class AnomalyDetector {
     }
 
     // Look for similar error messages in the past
-    const similarErrors = await this.sql<Array<{ count: number }>>`
-      SELECT COUNT(*) as count
-      FROM events
-      WHERE monitor_id = ${event.monitor_id}
-        AND type IN ('error', 'down')
-        AND message ILIKE ${`%${this.extractErrorPattern(event.message)}%`}
-        AND id != ${event.id}
-        AND created_at > NOW() - INTERVAL '7 days'
-    `;
+    const count = await this.db.getSimilarErrorCount(event.monitor_id, event.id, this.extractErrorPattern(event.message));
 
-    return similarErrors.length === 0 || similarErrors[0].count === 0;
+    return count === 0;
   }
 
   private async hasErrorRateSpike(monitorId: string): Promise<boolean> {
     // Get error count in the last hour
-    const recentErrors = await this.sql<Array<{ count: number }>>`
-      SELECT COUNT(*) as count
-      FROM events
-      WHERE monitor_id = ${monitorId}
-        AND type IN ('error', 'down')
-        AND created_at > NOW() - INTERVAL '1 hour'
-    `;
-
-    const recentErrorCount = recentErrors[0]?.count || 0;
+    const recentErrorCount = await this.db.getRecentErrorCount(monitorId);
 
     // Get baseline error count (average per hour over last 7 days, excluding last hour)
-    const baselineErrors = await this.sql<Array<{ avg_per_hour: number }>>`
-      SELECT
-        COUNT(*)::NUMERIC / EXTRACT(EPOCH FROM (NOW() - MIN(created_at))) * 3600 as avg_per_hour
-      FROM events
-      WHERE monitor_id = ${monitorId}
-        AND type IN ('error', 'down')
-        AND created_at > NOW() - INTERVAL '7 days'
-        AND created_at < NOW() - INTERVAL '1 hour'
-    `;
-
-    const baselineErrorRate = baselineErrors[0]?.avg_per_hour || 0;
+    const baselineErrorRate = await this.db.getBaselineErrorRate(monitorId);
 
     // If we have fewer than 3 baseline errors, don't flag as spike
     if (baselineErrorRate < 1) {
@@ -113,14 +87,7 @@ export class AnomalyDetector {
 
   async markForDiagnosis(eventId: string, reason: string) {
     // Update the event to flag it for diagnosis
-    await this.sql`
-      UPDATE events
-      SET raw_data = COALESCE(raw_data, '{}'::jsonb) || jsonb_build_object(
-        'flagged_for_diagnosis', true,
-        'diagnosis_reason', ${reason}
-      )
-      WHERE id = ${eventId}
-    `;
+    await this.db.flagEventForDiagnosis(eventId, reason);
 
     console.log(`Event ${eventId} flagged for diagnosis: ${reason}`);
   }

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type postgres from 'postgres';
+import type { Database } from '../db/index.js';
 import type { AnomalyDetector } from '../monitoring/AnomalyDetector.js';
 import type { IncidentService } from '../monitoring/IncidentService.js';
 
@@ -73,7 +73,7 @@ const STATUS_CODE_MAP: Record<number, string> = {
 
 export async function registerOtlpRoutes(
   fastify: FastifyInstance,
-  sql: postgres.Sql,
+  db: Database,
   anomalyDetector: AnomalyDetector,
   incidentService: IncidentService,
 ) {
@@ -113,34 +113,28 @@ export async function registerOtlpRoutes(
               attributes: flattenAttributes(e.attributes),
             }));
 
-            await sql`
-              INSERT INTO spans (
-                trace_id, span_id, parent_span_id, project_id, service_name,
-                operation_name, kind, start_time, duration_ms,
-                status_code, status_message, attributes, events
-              ) VALUES (
-                ${otlpSpan.traceId},
-                ${otlpSpan.spanId},
-                ${otlpSpan.parentSpanId || null},
-                ${projectId},
-                ${serviceName},
-                ${otlpSpan.name},
-                ${SPAN_KIND_MAP[otlpSpan.kind] || 'UNSPECIFIED'},
-                ${startTimeMs},
-                ${durationMs},
-                ${statusCode},
-                ${statusMessage},
-                ${JSON.stringify(attributes)},
-                ${JSON.stringify(spanEvents)}
-              )
-            `;
+            await db.insertSpan({
+              trace_id: otlpSpan.traceId,
+              span_id: otlpSpan.spanId,
+              parent_span_id: otlpSpan.parentSpanId || null,
+              project_id: projectId,
+              service_name: serviceName,
+              operation_name: otlpSpan.name,
+              kind: SPAN_KIND_MAP[otlpSpan.kind] || 'UNSPECIFIED',
+              start_time: startTimeMs,
+              duration_ms: durationMs,
+              status_code: statusCode,
+              status_message: statusMessage,
+              attributes,
+              events: spanEvents,
+            });
 
             spanCount++;
 
             // Check for error spans → create trace_error events
             if (statusCode === 'ERROR') {
               await createTraceEvent(
-                sql,
+                db,
                 anomalyDetector,
                 incidentService,
                 projectId,
@@ -163,7 +157,7 @@ export async function registerOtlpRoutes(
             // Check for slow database queries → create slow_query events
             if (attributes['db.system'] && durationMs > 1000) {
               await createTraceEvent(
-                sql,
+                db,
                 anomalyDetector,
                 incidentService,
                 projectId,
@@ -228,70 +222,30 @@ export async function registerOtlpRoutes(
       let rootSpans;
 
       if (status === 'error') {
-        // Find traces that contain at least one ERROR span
-        rootSpans = await sql`
-          SELECT DISTINCT ON (s.trace_id) s.*
-          FROM spans s
-          WHERE s.project_id = ${project_id}
-            AND s.parent_span_id IS NULL
-            AND EXISTS (
-              SELECT 1 FROM spans e
-              WHERE e.trace_id = s.trace_id
-                AND e.status_code = 'ERROR'
-            )
-          ORDER BY s.trace_id, s.start_time ASC
-        `;
-        // Sort by start_time desc and limit
+        rootSpans = await db.getErrorRootSpans(project_id);
         rootSpans = rootSpans
-          .sort((a, b) =>
-            Number(b.start_time) - Number(a.start_time))
+          .sort((a, b) => Number(b.start_time) - Number(a.start_time))
           .slice(0, Number(limit));
       } else if (status === 'ok') {
-        // Find traces with no ERROR spans
-        rootSpans = await sql`
-          SELECT DISTINCT ON (s.trace_id) s.*
-          FROM spans s
-          WHERE s.project_id = ${project_id}
-            AND s.parent_span_id IS NULL
-            AND NOT EXISTS (
-              SELECT 1 FROM spans e
-              WHERE e.trace_id = s.trace_id
-                AND e.status_code = 'ERROR'
-            )
-          ORDER BY s.trace_id, s.start_time ASC
-        `;
+        rootSpans = await db.getOkRootSpans(project_id);
         rootSpans = rootSpans
-          .sort((a, b) =>
-            Number(b.start_time) - Number(a.start_time))
+          .sort((a, b) => Number(b.start_time) - Number(a.start_time))
           .slice(0, Number(limit));
       } else {
-        rootSpans = await sql`
-          SELECT * FROM spans
-          WHERE project_id = ${project_id}
-            AND parent_span_id IS NULL
-          ORDER BY start_time DESC
-          LIMIT ${Number(limit)}
-        `;
+        rootSpans = await db.getRootSpans(project_id, Number(limit));
       }
 
       // For each root span, get a summary (span count, has errors, total duration)
       const traces = [];
       for (const root of rootSpans) {
-        const stats = await sql`
-          SELECT
-            COUNT(*)::int AS span_count,
-            MAX(duration_ms)::int AS max_duration_ms,
-            BOOL_OR(status_code = 'ERROR') AS has_errors
-          FROM spans
-          WHERE trace_id = ${root.trace_id}
-        `;
+        const stats = await db.getTraceStats(root.trace_id);
 
         traces.push({
           trace_id: root.trace_id,
           root_span: root,
-          span_count: stats[0].span_count,
-          max_duration_ms: stats[0].max_duration_ms,
-          has_errors: stats[0].has_errors,
+          span_count: stats.span_count,
+          max_duration_ms: stats.max_duration_ms,
+          has_errors: stats.has_errors,
         });
       }
 
@@ -308,11 +262,7 @@ export async function registerOtlpRoutes(
     const { traceId } = request.params;
 
     try {
-      const spans = await sql`
-        SELECT * FROM spans
-        WHERE trace_id = ${traceId}
-        ORDER BY start_time ASC
-      `;
+      const spans = await db.getSpansByTraceId(traceId);
 
       if (spans.length === 0) {
         reply.code(404);
@@ -332,30 +282,15 @@ export async function registerOtlpRoutes(
     const { id } = request.params;
 
     try {
-      // Fetch the incident's events
-      const incidents = await sql<Array<{
-        events: string[];
-        project_id: string;
-        created_at: Date;
-      }>>`
-        SELECT events, project_id, created_at FROM incidents WHERE id = ${id}
-      `;
+      const incident = await db.getIncident(id);
 
-      if (incidents.length === 0) {
+      if (!incident) {
         reply.code(404);
         return { error: 'Incident not found' };
       }
 
-      const incident = incidents[0];
       const eventIds = incident.events;
-
-      // Fetch events to find trace IDs
-      const events = await sql<Array<{
-        raw_data: Record<string, unknown> | null;
-        created_at: Date;
-      }>>`
-        SELECT raw_data, created_at FROM events WHERE id = ANY(${eventIds})
-      `;
+      const events = await db.getEventsByIds(eventIds);
 
       // Extract direct trace IDs from event raw_data
       const traceIds: string[] = [];
@@ -369,40 +304,25 @@ export async function registerOtlpRoutes(
       let spans;
 
       if (traceIds.length > 0) {
-        spans = await sql`
-          SELECT * FROM spans
-          WHERE trace_id = ANY(${traceIds})
-          ORDER BY start_time ASC
-          LIMIT 200
-        `;
+        spans = await db.getSpansByTraceIds(traceIds, 200);
       } else {
         // Fallback: time window around the incident
         const timestamps = events.map((e) => e.created_at.getTime());
         const minTime = Math.min(...timestamps) - 2 * 60 * 1000;
         const maxTime = Math.max(...timestamps) + 2 * 60 * 1000;
 
-        const rootSpans = await sql<Array<{ trace_id: string }>>`
-          SELECT DISTINCT trace_id
-          FROM spans
-          WHERE project_id = ${incident.project_id}
-            AND parent_span_id IS NULL
-            AND start_time >= ${minTime}
-            AND start_time <= ${maxTime}
-          ORDER BY start_time DESC
-          LIMIT 5
-        `;
+        const nearbyTraceIds = await db.getDistinctTraceIdsInWindow(
+          incident.project_id,
+          minTime,
+          maxTime,
+          5
+        );
 
-        if (rootSpans.length === 0) {
+        if (nearbyTraceIds.length === 0) {
           return { incident_id: id, spans: [] };
         }
 
-        const nearbyTraceIds = rootSpans.map((r) => r.trace_id);
-        spans = await sql`
-          SELECT * FROM spans
-          WHERE trace_id = ANY(${nearbyTraceIds})
-          ORDER BY start_time ASC
-          LIMIT 200
-        `;
+        spans = await db.getSpansByTraceIds(nearbyTraceIds, 200);
       }
 
       return { incident_id: id, spans };
@@ -450,7 +370,7 @@ function flattenAttributes(attrs?: OtlpAttribute[]): Record<string, unknown> {
  * Create a ScanWarp event from a trace span and run it through the anomaly detection pipeline.
  */
 async function createTraceEvent(
-  sql: postgres.Sql,
+  db: Database,
   anomalyDetector: AnomalyDetector,
   incidentService: IncidentService,
   projectId: string,
@@ -460,32 +380,15 @@ async function createTraceEvent(
   rawData: Record<string, unknown>,
   request: { log: { error: (obj: unknown, msg?: string) => void } },
 ) {
-  const result = await sql<Array<{
-    id: string;
-    project_id: string;
-    monitor_id: string | null;
-    type: string;
-    source: string;
-    message: string;
-    raw_data: Record<string, unknown> | null;
-    severity: string;
-    created_at: Date;
-  }>>`
-    INSERT INTO events (
-      project_id, type, source, message, raw_data, severity, created_at
-    ) VALUES (
-      ${projectId},
-      ${type},
-      'otel',
-      ${message},
-      ${JSON.stringify(rawData)},
-      ${severity},
-      NOW()
-    )
-    RETURNING *
-  `;
+  const eventRow = await db.createEvent({
+    project_id: projectId,
+    type,
+    source: 'otel',
+    message,
+    raw_data: rawData,
+    severity,
+  });
 
-  const eventRow = result[0];
   const event = {
     id: eventRow.id,
     project_id: eventRow.project_id,

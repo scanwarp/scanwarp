@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
-import postgres from 'postgres';
-import type { WebhookPayload, VercelLogDrainPayload, Monitor } from '@scanwarp/core';
+import type { WebhookPayload, VercelLogDrainPayload } from '@scanwarp/core';
+import { createDatabase } from './db/index.js';
 import { MonitorRunner } from './monitoring/MonitorRunner.js';
 import { AnomalyDetector } from './monitoring/AnomalyDetector.js';
 import { IncidentService } from './monitoring/IncidentService.js';
@@ -12,13 +12,7 @@ import { registerGitHubWebhook } from './integrations/github.js';
 import { registerOtlpRoutes } from './integrations/otlp.js';
 import { NotificationManager } from './notifications/manager.js';
 
-const sql = postgres({
-  host: process.env.POSTGRES_HOST || 'localhost',
-  port: parseInt(process.env.POSTGRES_PORT || '5432'),
-  database: process.env.POSTGRES_DB || 'scanwarp',
-  username: process.env.POSTGRES_USER || 'scanwarp',
-  password: process.env.POSTGRES_PASSWORD || 'scanwarp',
-});
+const db = createDatabase();
 
 const fastify = Fastify({
   logger: true,
@@ -39,17 +33,17 @@ fastify.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, bo
 });
 
 // Initialize monitoring components
-const monitorRunner = new MonitorRunner(sql);
-const anomalyDetector = new AnomalyDetector(sql);
-const incidentService = new IncidentService(sql, process.env.ANTHROPIC_API_KEY);
-const statusChecker = new StatusChecker(sql);
-const notificationManager = new NotificationManager(sql);
+const monitorRunner = new MonitorRunner(db);
+const anomalyDetector = new AnomalyDetector(db);
+const incidentService = new IncidentService(db, process.env.ANTHROPIC_API_KEY);
+const statusChecker = new StatusChecker(db);
+const notificationManager = new NotificationManager(db);
 
 // Initialize optional integrations based on env vars
 let supabasePoller: SupabasePoller | null = null;
 if (process.env.SUPABASE_PROJECT_REF && process.env.SUPABASE_SERVICE_KEY) {
   supabasePoller = new SupabasePoller(
-    sql,
+    db,
     process.env.SUPABASE_PROJECT_REF,
     process.env.SUPABASE_SERVICE_KEY
   );
@@ -63,22 +57,19 @@ fastify.get('/health', async () => {
 });
 
 // Register provider webhooks
-registerStripeWebhook(fastify, sql, process.env.STRIPE_WEBHOOK_SECRET);
-registerGitHubWebhook(fastify, sql, process.env.GITHUB_WEBHOOK_SECRET);
+registerStripeWebhook(fastify, db, process.env.STRIPE_WEBHOOK_SECRET);
+registerGitHubWebhook(fastify, db, process.env.GITHUB_WEBHOOK_SECRET);
 
 // Register OTLP trace/metric ingest routes
-registerOtlpRoutes(fastify, sql, anomalyDetector, incidentService);
+registerOtlpRoutes(fastify, db, anomalyDetector, incidentService);
 
 // Project management endpoints
 fastify.post<{ Body: { name: string } }>('/projects', async (request, reply) => {
   const { name } = request.body;
 
   try {
-    const result = await sql<Array<{ id: string }>>`
-      INSERT INTO projects (name) VALUES (${name}) RETURNING id
-    `;
-
-    return { success: true, id: result[0].id };
+    const result = await db.createProject(name);
+    return { success: true, id: result.id };
   } catch (error) {
     request.log.error(error);
     reply.code(500);
@@ -88,14 +79,7 @@ fastify.post<{ Body: { name: string } }>('/projects', async (request, reply) => 
 
 fastify.get('/projects', async (request) => {
   const { name } = request.query as { name?: string };
-
-  let query = sql`SELECT * FROM projects`;
-
-  if (name) {
-    query = sql`SELECT * FROM projects WHERE name = ${name}`;
-  }
-
-  const projects = await query;
+  const projects = await db.getProjects(name || undefined);
   return projects;
 });
 
@@ -106,13 +90,8 @@ fastify.post<{
   const { project_id, url, check_interval_seconds = 60 } = request.body;
 
   try {
-    const result = await sql<Monitor[]>`
-      INSERT INTO monitors (project_id, url, check_interval_seconds)
-      VALUES (${project_id}, ${url}, ${check_interval_seconds})
-      RETURNING *
-    `;
-
-    return { success: true, monitor: result[0] };
+    const monitor = await db.createMonitor(project_id, url, check_interval_seconds);
+    return { success: true, monitor };
   } catch (error) {
     request.log.error(error);
     reply.code(500);
@@ -121,27 +100,20 @@ fastify.post<{
 });
 
 fastify.get('/monitors', async () => {
-  const monitors = await sql`
-    SELECT * FROM monitors
-    ORDER BY created_at DESC
-  `;
-
+  const monitors = await db.getMonitors();
   return { monitors };
 });
 
 fastify.get<{ Params: { id: string } }>('/monitors/:id', async (request, reply) => {
   const { id } = request.params;
+  const monitor = await db.getMonitorById(id);
 
-  const monitors = await sql<Monitor[]>`
-    SELECT * FROM monitors WHERE id = ${id}
-  `;
-
-  if (monitors.length === 0) {
+  if (!monitor) {
     reply.code(404);
     return { error: 'Monitor not found' };
   }
 
-  return { monitor: monitors[0] };
+  return { monitor };
 });
 
 // Events endpoints
@@ -154,27 +126,7 @@ fastify.get('/events', async (request) => {
     limit?: number;
   };
 
-  let query = sql`SELECT * FROM events WHERE 1=1`;
-
-  if (monitor_id) {
-    query = sql`${query} AND monitor_id = ${monitor_id}`;
-  }
-  if (project_id) {
-    query = sql`${query} AND project_id = ${project_id}`;
-  }
-  if (type) {
-    query = sql`${query} AND type = ${type}`;
-  }
-  if (source) {
-    query = sql`${query} AND source = ${source}`;
-  }
-
-  const events = await sql`
-    ${query}
-    ORDER BY created_at DESC
-    LIMIT ${limit}
-  `;
-
+  const events = await db.getEvents({ monitor_id, project_id, type, source, limit });
   return { events };
 });
 
@@ -189,36 +141,19 @@ fastify.post<{ Body: VercelLogDrainPayload[] }>('/ingest/vercel', async (request
       // Only process error-level logs
       if (log.level === 'error') {
         // Find or create a project for this deployment
-        const projectId = await getOrCreateProject(log.deploymentId || log.source);
+        const { id: projectId } = await db.getOrCreateProject(log.deploymentId || log.source);
 
         // Create event
-        const result = await sql<Array<{
-          id: string;
-          project_id: string;
-          monitor_id: string | null;
-          type: string;
-          source: string;
-          message: string;
-          raw_data: Record<string, unknown> | null;
-          severity: string;
-          created_at: Date;
-        }>>`
-          INSERT INTO events (
-            project_id, type, source, message, raw_data, severity, created_at
-          ) VALUES (
-            ${projectId},
-            'error',
-            'vercel',
-            ${log.message},
-            ${JSON.stringify(log)},
-            'high',
-            NOW()
-          )
-          RETURNING *
-        `;
+        const eventRow = await db.createEvent({
+          project_id: projectId,
+          type: 'error',
+          source: 'vercel',
+          message: log.message,
+          raw_data: log as unknown as Record<string, unknown>,
+          severity: 'high',
+        });
 
         // Run anomaly detection
-        const eventRow = result[0];
         const event = {
           id: eventRow.id,
           project_id: eventRow.project_id,
@@ -263,10 +198,7 @@ fastify.post<{ Body: WebhookPayload }>('/webhook', async (request, reply) => {
   const { event, service, data, timestamp } = request.body;
 
   try {
-    await sql`
-      INSERT INTO webhook_events (event, service, data, timestamp)
-      VALUES (${event}, ${service}, ${JSON.stringify(data)}, ${timestamp})
-    `;
+    await db.insertWebhookEvent(event, service, data, timestamp);
 
     return { success: true, message: 'Webhook received' };
   } catch (error) {
@@ -284,32 +216,7 @@ fastify.get('/incidents', async (request) => {
     limit?: number;
   };
 
-  let query = sql`SELECT * FROM incidents WHERE 1=1`;
-
-  if (project_id) {
-    query = sql`${query} AND project_id = ${project_id}`;
-  }
-  if (status) {
-    query = sql`${query} AND status = ${status}`;
-  }
-
-  const incidents = await sql<Array<{
-    id: string;
-    project_id: string;
-    events: string[];
-    status: string;
-    diagnosis_text: string | null;
-    diagnosis_fix: string | null;
-    severity: string;
-    fix_prompt: string | null;
-    created_at: Date;
-    resolved_at: Date | null;
-  }>>`
-    ${query}
-    ORDER BY created_at DESC
-    LIMIT ${limit}
-  `;
-
+  const incidents = await db.getIncidents({ project_id, status, limit });
   return { incidents };
 });
 
@@ -324,10 +231,7 @@ fastify.get<{ Params: { id: string } }>('/incidents/:id', async (request, reply)
   }
 
   // Also fetch the related events
-  const events = await sql`
-    SELECT * FROM events WHERE id = ANY(${incident.events})
-    ORDER BY created_at DESC
-  `;
+  const events = await db.getEventsByIds(incident.events);
 
   return {
     incident,
@@ -426,23 +330,6 @@ fastify.post<{ Params: { id: string } }>('/channels/:id/test', async (request, r
   }
 });
 
-// Helper function to get or create project
-async function getOrCreateProject(name: string): Promise<string> {
-  const existing = await sql<Array<{ id: string }>>`
-    SELECT id FROM projects WHERE name = ${name}
-  `;
-
-  if (existing.length > 0) {
-    return existing[0].id;
-  }
-
-  const created = await sql<Array<{ id: string }>>`
-    INSERT INTO projects (name) VALUES (${name}) RETURNING id
-  `;
-
-  return created[0].id;
-}
-
 // ===== WAITLIST ENDPOINTS =====
 
 // Submit email to waitlist
@@ -454,11 +341,7 @@ fastify.post('/waitlist', async (request, reply) => {
   }
 
   try {
-    await sql`
-      INSERT INTO waitlist (email)
-      VALUES (${email.toLowerCase().trim()})
-      ON CONFLICT (email) DO NOTHING
-    `;
+    await db.addToWaitlist(email);
 
     return { success: true, message: 'Added to waitlist' };
   } catch (err) {
@@ -477,15 +360,7 @@ fastify.get('/waitlist', async (request, reply) => {
   }
 
   try {
-    const entries = await sql<Array<{
-      id: string;
-      email: string;
-      created_at: Date;
-    }>>`
-      SELECT id, email, created_at
-      FROM waitlist
-      ORDER BY created_at DESC
-    `;
+    const entries = await db.getWaitlist();
 
     return {
       count: entries.length,
@@ -533,7 +408,7 @@ process.on('SIGTERM', async () => {
     await supabasePoller.stop();
   }
   await fastify.close();
-  await sql.end();
+  await db.close();
   process.exit(0);
 });
 

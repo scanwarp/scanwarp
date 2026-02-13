@@ -1,4 +1,4 @@
-import postgres from 'postgres';
+import type { Database } from '../db/index.js';
 import type { Incident } from '@scanwarp/core';
 import {
   createChannel,
@@ -8,11 +8,19 @@ import {
 } from './channels.js';
 
 export class NotificationManager {
-  constructor(private sql: postgres.Sql) {}
+  constructor(private db: Database) {}
 
   async notify(incident: Incident): Promise<void> {
     // Get enabled channels for this project
-    const channels = await this.getEnabledChannels(incident.project_id);
+    const rows = await this.db.getEnabledChannels(incident.project_id);
+    const channels: NotificationChannel[] = rows.map((r) => ({
+      id: r.id,
+      project_id: r.project_id,
+      type: r.type as 'discord' | 'slack',
+      webhook_url: r.webhook_url,
+      enabled: r.enabled,
+      created_at: r.created_at,
+    }));
 
     if (channels.length === 0) {
       return;
@@ -55,7 +63,7 @@ export class NotificationManager {
         await notificationChannel.send(payload);
 
         // Log the notification
-        await this.logNotification(channel.id, incident.id);
+        await this.db.logNotification(channel.id, incident.id);
 
         console.log(
           `Sent ${incident.severity} notification to ${channel.type} channel ${channel.id}`
@@ -71,7 +79,15 @@ export class NotificationManager {
 
   async notifyResolution(incident: Incident): Promise<void> {
     // Get enabled channels for this project
-    const channels = await this.getEnabledChannels(incident.project_id);
+    const rows = await this.db.getEnabledChannels(incident.project_id);
+    const channels: NotificationChannel[] = rows.map((r) => ({
+      id: r.id,
+      project_id: r.project_id,
+      type: r.type as 'discord' | 'slack',
+      webhook_url: r.webhook_url,
+      enabled: r.enabled,
+      created_at: r.created_at,
+    }));
 
     if (channels.length === 0) {
       return;
@@ -99,19 +115,6 @@ export class NotificationManager {
     }
   }
 
-  private async getEnabledChannels(
-    projectId: string
-  ): Promise<NotificationChannel[]> {
-    const rows = await this.sql<NotificationChannel[]>`
-      SELECT id, project_id, type, webhook_url, enabled, created_at
-      FROM notification_channels
-      WHERE project_id = ${projectId}
-      AND enabled = true
-    `;
-
-    return rows;
-  }
-
   private async getCorrelatedEvents(incident: Incident): Promise<
     Array<{
       type: string;
@@ -120,29 +123,13 @@ export class NotificationManager {
       created_at: Date;
     }>
   > {
-    // Get event IDs from the incident
     const eventIds = Array.isArray(incident.events) ? incident.events : [];
 
     if (eventIds.length === 0) {
       return [];
     }
 
-    const events = await this.sql<
-      Array<{
-        type: string;
-        source: string;
-        message: string;
-        created_at: Date;
-      }>
-    >`
-      SELECT type, source, message, created_at
-      FROM events
-      WHERE id = ANY(${eventIds}::uuid[])
-      ORDER BY created_at DESC
-      LIMIT 10
-    `;
-
-    return events;
+    return await this.db.getCorrelatedEvents(eventIds);
   }
 
   private async shouldSendNotification(severity: string): Promise<boolean> {
@@ -172,43 +159,18 @@ export class NotificationManager {
     incidentId: string
   ): Promise<boolean> {
     // Rule 1: Max 1 notification per incident per channel
-    const existingNotification = await this.sql`
-      SELECT id
-      FROM notification_log
-      WHERE channel_id = ${channelId}
-      AND incident_id = ${incidentId}
-      LIMIT 1
-    `;
-
-    if (existingNotification.length > 0) {
+    const alreadySent = await this.db.hasNotificationForIncident(channelId, incidentId);
+    if (alreadySent) {
       return false;
     }
 
     // Rule 2: Max 10 notifications per hour per channel
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const recentNotifications = await this.sql`
-      SELECT COUNT(*) as count
-      FROM notification_log
-      WHERE channel_id = ${channelId}
-      AND sent_at > ${oneHourAgo}
-    `;
-
-    const count = parseInt(recentNotifications[0]?.count || '0');
-    if (count >= 10) {
+    const recentCount = await this.db.getRecentNotificationCount(channelId);
+    if (recentCount >= 10) {
       return false;
     }
 
     return true;
-  }
-
-  private async logNotification(
-    channelId: string,
-    incidentId: string
-  ): Promise<void> {
-    await this.sql`
-      INSERT INTO notification_log (channel_id, incident_id)
-      VALUES (${channelId}, ${incidentId})
-    `;
   }
 
   // API methods for channel management
@@ -217,53 +179,43 @@ export class NotificationManager {
     type: 'discord' | 'slack',
     webhookUrl: string
   ): Promise<NotificationChannel> {
-    const rows = await this.sql<NotificationChannel[]>`
-      INSERT INTO notification_channels (project_id, type, webhook_url)
-      VALUES (${projectId}, ${type}, ${webhookUrl})
-      RETURNING id, project_id, type, webhook_url, enabled, created_at
-    `;
-
-    return rows[0];
+    const row = await this.db.createChannel(projectId, type, webhookUrl);
+    return {
+      id: row.id,
+      project_id: row.project_id,
+      type: row.type as 'discord' | 'slack',
+      webhook_url: row.webhook_url,
+      enabled: row.enabled,
+      created_at: row.created_at,
+    };
   }
 
   async getChannels(projectId: string): Promise<NotificationChannel[]> {
-    const rows = await this.sql<NotificationChannel[]>`
-      SELECT id, project_id, type, webhook_url, enabled, created_at
-      FROM notification_channels
-      WHERE project_id = ${projectId}
-      ORDER BY created_at DESC
-    `;
-
-    return rows;
+    const rows = await this.db.getChannels(projectId);
+    return rows.map((r) => ({
+      id: r.id,
+      project_id: r.project_id,
+      type: r.type as 'discord' | 'slack',
+      webhook_url: r.webhook_url,
+      enabled: r.enabled,
+      created_at: r.created_at,
+    }));
   }
 
   async deleteChannel(channelId: string): Promise<void> {
-    await this.sql`
-      DELETE FROM notification_channels
-      WHERE id = ${channelId}
-    `;
+    await this.db.deleteChannel(channelId);
   }
 
   async toggleChannel(channelId: string, enabled: boolean): Promise<void> {
-    await this.sql`
-      UPDATE notification_channels
-      SET enabled = ${enabled}
-      WHERE id = ${channelId}
-    `;
+    await this.db.toggleChannel(channelId, enabled);
   }
 
   async testChannel(channelId: string): Promise<void> {
-    const channels = await this.sql<NotificationChannel[]>`
-      SELECT id, project_id, type, webhook_url, enabled, created_at
-      FROM notification_channels
-      WHERE id = ${channelId}
-    `;
+    const channel = await this.db.getChannelById(channelId);
 
-    if (channels.length === 0) {
+    if (!channel) {
       throw new Error('Channel not found');
     }
-
-    const channel = channels[0];
 
     // Create a test incident
     const testIncident: Incident = {
@@ -283,7 +235,14 @@ export class NotificationManager {
       incident: testIncident,
     };
 
-    const notificationChannel = createChannel(channel);
+    const notificationChannel = createChannel({
+      id: channel.id,
+      project_id: channel.project_id,
+      type: channel.type as 'discord' | 'slack',
+      webhook_url: channel.webhook_url,
+      enabled: channel.enabled,
+      created_at: channel.created_at,
+    });
     await notificationChannel.send(payload);
   }
 }

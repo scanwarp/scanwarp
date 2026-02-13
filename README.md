@@ -42,6 +42,17 @@ Get a hosted ScanWarp server in 60 seconds. Then run `npx scanwarp init --server
 
 ## Self-Host
 
+**No Docker (SQLite):**
+
+```bash
+npx scanwarp server
+npx scanwarp init --server http://localhost:3000
+```
+
+Uses SQLite — zero dependencies, data stored at `~/.scanwarp/scanwarp.db`.
+
+**With Docker (Postgres):**
+
 ```bash
 docker compose up -d
 npx scanwarp init --server http://localhost:3000
