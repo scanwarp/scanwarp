@@ -9,6 +9,7 @@ import { SupabasePoller } from './monitoring/SupabasePoller.js';
 import { StatusChecker } from './monitoring/StatusChecker.js';
 import { registerStripeWebhook } from './integrations/stripe.js';
 import { registerGitHubWebhook } from './integrations/github.js';
+import { registerOtlpRoutes } from './integrations/otlp.js';
 import { NotificationManager } from './notifications/manager.js';
 
 const sql = postgres({
@@ -64,6 +65,9 @@ fastify.get('/health', async () => {
 // Register provider webhooks
 registerStripeWebhook(fastify, sql, process.env.STRIPE_WEBHOOK_SECRET);
 registerGitHubWebhook(fastify, sql, process.env.GITHUB_WEBHOOK_SECRET);
+
+// Register OTLP trace/metric ingest routes
+registerOtlpRoutes(fastify, sql, anomalyDetector, incidentService);
 
 // Project management endpoints
 fastify.post<{ Body: { name: string } }>('/projects', async (request, reply) => {

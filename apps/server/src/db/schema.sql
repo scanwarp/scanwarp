@@ -114,6 +114,30 @@ CREATE TABLE IF NOT EXISTS waitlist (
 CREATE INDEX idx_waitlist_created_at ON waitlist(created_at);
 CREATE INDEX idx_waitlist_email ON waitlist(email);
 
+-- OpenTelemetry spans table
+CREATE TABLE IF NOT EXISTS spans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  trace_id TEXT NOT NULL,
+  span_id TEXT NOT NULL,
+  parent_span_id TEXT,
+  project_id TEXT NOT NULL,
+  service_name TEXT NOT NULL,
+  operation_name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  start_time BIGINT NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  status_code TEXT,
+  status_message TEXT,
+  attributes JSONB DEFAULT '{}',
+  events JSONB DEFAULT '[]',
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_spans_project_id ON spans(project_id);
+CREATE INDEX idx_spans_trace_id ON spans(trace_id);
+CREATE INDEX idx_spans_start_time ON spans(start_time);
+CREATE INDEX idx_spans_project_start ON spans(project_id, start_time);
+
 -- Legacy webhook events (keeping for compatibility)
 CREATE TABLE IF NOT EXISTS webhook_events (
   id SERIAL PRIMARY KEY,

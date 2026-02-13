@@ -8,13 +8,13 @@ export interface Monitor {
   created_at: Date;
 }
 
-export type EventSource = 'monitor' | 'vercel' | 'stripe' | 'supabase' | 'github' | 'provider-status';
+export type EventSource = 'monitor' | 'vercel' | 'stripe' | 'supabase' | 'github' | 'provider-status' | 'otel';
 
 export interface Event {
   id: string;
   project_id: string;
   monitor_id?: string;
-  type: 'error' | 'slow' | 'down' | 'up';
+  type: 'error' | 'slow' | 'down' | 'up' | 'trace_error' | 'slow_query';
   source: EventSource;
   message: string;
   raw_data?: Record<string, unknown>;
