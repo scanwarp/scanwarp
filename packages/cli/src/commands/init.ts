@@ -8,6 +8,7 @@ import { setupStripe } from '../integrations/stripe.js';
 import { setupSupabase } from '../integrations/supabase.js';
 import { setupMCP } from '../integrations/mcp.js';
 import { setupNotifications } from '../integrations/notifications.js';
+import { setupInstrumentation } from '../integrations/instrument.js';
 import { config } from '../config.js';
 
 interface InitOptions {
@@ -98,10 +99,13 @@ export async function initCommand(options: InitOptions = {}) {
 
   // Step 4: Create project and monitor
   const setupSpinner = ora('Setting up monitoring...').start();
+  let projectId: string;
 
   try {
     const project = await api.createProject(detected.projectName || 'my-app');
     const monitor = await api.createMonitor(project.id, productionUrl);
+
+    projectId = project.id;
 
     // Save project ID to config
     config.setProjectId(project.id);
@@ -135,17 +139,21 @@ export async function initCommand(options: InitOptions = {}) {
     await setupSupabase(api);
   }
 
-  // Step 6: MCP Configuration
+  // Step 6: Request Tracing
+  console.log(chalk.bold('\n📡 Request Tracing\n'));
+  await setupInstrumentation(detected, serverUrl, projectId);
+
+  // Step 7: MCP Configuration
   if (!options.skipMcp) {
     console.log(chalk.bold('\n🤖 MCP Configuration\n'));
     await setupMCP(serverUrl);
   }
 
-  // Step 7: Notifications
+  // Step 8: Notifications
   console.log(chalk.bold('\n🔔 Notifications\n'));
   await setupNotifications();
 
-  // Step 8: Summary
+  // Step 9: Summary
   printSummary(api, productionUrl, detected);
 }
 
