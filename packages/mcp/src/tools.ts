@@ -1,4 +1,4 @@
-import type { ScanWarpAPI } from './api.js';
+import type { ScanWarpAPI, SpanRow } from './api.js';
 
 function formatTimeSince(date: Date): string {
   const now = new Date();
@@ -208,6 +208,18 @@ export async function getIncidentDetail(
       output += `\n`;
     }
 
+    // Trace data
+    try {
+      const spans = await api.getIncidentTraces(incidentId);
+      if (spans.length > 0) {
+        output += `TRACE DATA:\n`;
+        output += buildTraceWaterfall(spans);
+        output += `\n`;
+      }
+    } catch {
+      // Trace data is optional — don't fail the whole response
+    }
+
     if (incident.correlation_group) {
       output += `Correlation Group: ${incident.correlation_group}\n`;
       output += `This incident groups related events that happened together.\n\n`;
@@ -319,4 +331,295 @@ export async function getFixPrompt(
     }
     return `❌ Error fetching fix prompt`;
   }
+}
+
+export async function getRecentTraces(
+  api: ScanWarpAPI,
+  projectId: string,
+  options: {
+    limit?: number;
+    status?: 'error' | 'ok';
+  } = {}
+): Promise<string> {
+  try {
+    const traces = await api.getRecentTraces({
+      projectId,
+      limit: options.limit || 10,
+      status: options.status,
+    });
+
+    if (traces.length === 0) {
+      if (options.status === 'error') {
+        return 'No traces with errors found. Your requests are completing successfully!';
+      }
+      return 'No traces found. Make sure @scanwarp/instrument is configured and your app is receiving traffic.';
+    }
+
+    let output = `Found ${traces.length} recent trace${traces.length !== 1 ? 's' : ''}`;
+    if (options.status) {
+      output += ` (filtered: ${options.status})`;
+    }
+    output += ':\n\n';
+
+    for (const trace of traces) {
+      const root = trace.root_span;
+      const statusIcon = trace.has_errors ? '✗' : '✓';
+      const time = new Date(Number(root.start_time)).toISOString();
+
+      // Format the root span label
+      const label = formatSpanLabel(root);
+
+      output += `${statusIcon} ${label} (${root.duration_ms}ms)\n`;
+      output += `   Trace: ${trace.trace_id}\n`;
+      output += `   Service: ${root.service_name}\n`;
+      output += `   Spans: ${trace.span_count} | Max duration: ${trace.max_duration_ms}ms\n`;
+      output += `   Time: ${time}\n`;
+
+      if (trace.has_errors) {
+        output += `   ⚠ Contains errors\n`;
+      }
+
+      output += '\n';
+    }
+
+    output += 'Use get_trace_detail with a trace_id to see the full request waterfall.';
+
+    return output;
+  } catch (error) {
+    if (error instanceof Error) {
+      return `❌ Error fetching traces: ${error.message}`;
+    }
+    return `❌ Error fetching traces`;
+  }
+}
+
+export async function getTraceDetail(
+  api: ScanWarpAPI,
+  traceId: string
+): Promise<string> {
+  try {
+    const spans = await api.getTraceDetail(traceId);
+
+    if (spans.length === 0) {
+      return `No spans found for trace ${traceId}. The trace may have expired or the ID may be incorrect.`;
+    }
+
+    const root = spans.find((s) => !s.parent_span_id);
+    const hasErrors = spans.some((s) => s.status_code === 'ERROR');
+    const totalDuration = root?.duration_ms || Math.max(...spans.map((s) => s.duration_ms));
+
+    let output = `Trace ${traceId}\n`;
+    output += `${'─'.repeat(50)}\n`;
+    output += `Service: ${root?.service_name || spans[0].service_name}\n`;
+    output += `Total duration: ${totalDuration}ms\n`;
+    output += `Spans: ${spans.length}\n`;
+    output += `Status: ${hasErrors ? '✗ Has errors' : '✓ OK'}\n\n`;
+
+    output += `REQUEST WATERFALL:\n`;
+    output += buildTraceWaterfall(spans);
+
+    // List error spans explicitly
+    const errorSpans = spans.filter((s) => s.status_code === 'ERROR');
+    if (errorSpans.length > 0) {
+      output += `\nERROR SPANS (${errorSpans.length}):\n`;
+      for (const span of errorSpans) {
+        output += `  ✗ ${formatSpanLabel(span)} (${span.duration_ms}ms)\n`;
+        if (span.status_message) {
+          output += `    Message: ${span.status_message}\n`;
+        }
+        // Check for exception events
+        const exceptionEvent = span.events.find((e) => e.name === 'exception');
+        if (exceptionEvent?.attributes) {
+          const msg = exceptionEvent.attributes['exception.message'];
+          if (typeof msg === 'string') {
+            output += `    Exception: ${msg.length > 200 ? msg.substring(0, 200) + '...' : msg}\n`;
+          }
+        }
+      }
+    }
+
+    // Find slowest spans
+    const sortedByDuration = [...spans].sort((a, b) => b.duration_ms - a.duration_ms);
+    const slowest = sortedByDuration.slice(0, 3);
+
+    output += `\nSLOWEST OPERATIONS:\n`;
+    for (const span of slowest) {
+      const pct = totalDuration > 0 ? Math.round((span.duration_ms / totalDuration) * 100) : 0;
+      output += `  ${formatSpanLabel(span)}: ${span.duration_ms}ms (${pct}% of total)\n`;
+    }
+
+    return output;
+  } catch (error) {
+    if (error instanceof Error) {
+      return `❌ Error fetching trace: ${error.message}`;
+    }
+    return `❌ Error fetching trace`;
+  }
+}
+
+export async function getTraceForIncident(
+  api: ScanWarpAPI,
+  incidentId: string
+): Promise<string> {
+  try {
+    const [incidentData, spans] = await Promise.all([
+      api.getIncident(incidentId),
+      api.getIncidentTraces(incidentId),
+    ]);
+
+    const { incident } = incidentData;
+
+    let output = `Traces for Incident #${incidentId.substring(0, 8)}\n`;
+    output += `${'─'.repeat(50)}\n\n`;
+
+    // Show diagnosis summary
+    if (incident.diagnosis_text) {
+      output += `ROOT CAUSE: ${incident.diagnosis_text}\n\n`;
+    }
+
+    if (spans.length === 0) {
+      output += 'No trace data available for this incident.\n';
+
+      if (incident.diagnosis_fix) {
+        output += `\nSUGGESTED FIX: ${incident.diagnosis_fix}\n`;
+      }
+
+      return output;
+    }
+
+    // Group spans by trace_id
+    const traceIds = [...new Set(spans.map((s) => s.trace_id))];
+    output += `Found ${spans.length} spans across ${traceIds.length} trace${traceIds.length !== 1 ? 's' : ''}.\n\n`;
+
+    output += `REQUEST WATERFALL:\n`;
+    output += buildTraceWaterfall(spans);
+
+    // Highlight the bottleneck
+    const errorSpans = spans.filter((s) => s.status_code === 'ERROR');
+    if (errorSpans.length > 0) {
+      output += `\nERROR SPANS:\n`;
+      for (const span of errorSpans) {
+        output += `  ✗ ${formatSpanLabel(span)} (${span.duration_ms}ms) — ${span.service_name}\n`;
+        if (span.status_message) {
+          output += `    ${span.status_message}\n`;
+        }
+      }
+    }
+
+    if (incident.diagnosis_fix) {
+      output += `\nSUGGESTED FIX:\n${incident.diagnosis_fix}\n`;
+    }
+
+    if (incident.fix_prompt) {
+      output += `\nFIX PROMPT (ready to use):\n${'─'.repeat(50)}\n${incident.fix_prompt}\n${'─'.repeat(50)}\n`;
+    }
+
+    return output;
+  } catch (error) {
+    if (error instanceof Error) {
+      return `❌ Error fetching traces for incident: ${error.message}`;
+    }
+    return `❌ Error fetching traces for incident`;
+  }
+}
+
+// ─── Trace formatting helpers ───
+
+function formatSpanLabel(span: SpanRow): string {
+  const attrs = span.attributes;
+
+  // Database spans
+  if (attrs['db.system']) {
+    const stmt = attrs['db.statement'];
+    if (typeof stmt === 'string') {
+      const truncated = stmt.length > 80 ? stmt.substring(0, 80) + '...' : stmt;
+      return `${attrs['db.system']}: ${truncated}`;
+    }
+    return `${attrs['db.system']}: ${span.operation_name}`;
+  }
+
+  // HTTP spans
+  const method = attrs['http.method'] || attrs['http.request.method'];
+  const route = attrs['http.route'] || attrs['http.target'] || attrs['url.path'];
+  if (method && route) {
+    return `${method} ${route}`;
+  }
+
+  return span.operation_name;
+}
+
+/**
+ * Build a human-readable waterfall view from a list of spans.
+ */
+function buildTraceWaterfall(spans: SpanRow[]): string {
+  // Group by trace_id
+  const traceMap = new Map<string, SpanRow[]>();
+  for (const span of spans) {
+    const group = traceMap.get(span.trace_id) || [];
+    group.push(span);
+    traceMap.set(span.trace_id, group);
+  }
+
+  const sections: string[] = [];
+
+  for (const [traceId, traceSpans] of traceMap) {
+    traceSpans.sort((a, b) => Number(a.start_time) - Number(b.start_time));
+
+    // Build parent → children index
+    const childrenMap = new Map<string | null, SpanRow[]>();
+    for (const span of traceSpans) {
+      const parentKey = span.parent_span_id;
+      const siblings = childrenMap.get(parentKey) || [];
+      siblings.push(span);
+      childrenMap.set(parentKey, siblings);
+    }
+
+    // Find root spans
+    const spanIds = new Set(traceSpans.map((s) => s.span_id));
+    const roots = traceSpans.filter(
+      (s) => !s.parent_span_id || !spanIds.has(s.parent_span_id)
+    );
+
+    if (roots.length === 0) continue;
+
+    let section = `\`\`\`\nTrace ${traceId}\n`;
+
+    for (const root of roots) {
+      section += renderSpanTree(root, childrenMap, '', true);
+    }
+
+    section += '```\n';
+    sections.push(section);
+
+    if (sections.length >= 5) break;
+  }
+
+  return sections.join('\n');
+}
+
+function renderSpanTree(
+  span: SpanRow,
+  childrenMap: Map<string | null, SpanRow[]>,
+  prefix: string,
+  isLast: boolean,
+): string {
+  const status = span.status_code === 'ERROR'
+    ? `✗ ${span.status_message || 'error'}`
+    : '✓';
+  const label = formatSpanLabel(span);
+  const connector = prefix === '' ? '' : isLast ? '└─ ' : '├─ ';
+
+  let line = `${prefix}${connector}${label} (${span.duration_ms}ms) ${status}\n`;
+
+  // Render children
+  const children = childrenMap.get(span.span_id) || [];
+  children.sort((a, b) => Number(a.start_time) - Number(b.start_time));
+
+  const childPrefix = prefix === '' ? '' : prefix + (isLast ? '   ' : '│  ');
+
+  for (let i = 0; i < children.length; i++) {
+    line += renderSpanTree(children[i], childrenMap, childPrefix, i === children.length - 1);
+  }
+
+  return line;
 }

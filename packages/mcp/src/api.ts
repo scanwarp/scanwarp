@@ -8,6 +8,31 @@ export interface ProviderStatus {
   details: string | null;
 }
 
+export interface SpanRow {
+  id: string;
+  trace_id: string;
+  span_id: string;
+  parent_span_id: string | null;
+  project_id: string;
+  service_name: string;
+  operation_name: string;
+  kind: string;
+  start_time: number;
+  duration_ms: number;
+  status_code: string | null;
+  status_message: string | null;
+  attributes: Record<string, unknown>;
+  events: Array<{ name: string; attributes?: Record<string, unknown> }>;
+}
+
+export interface TraceSummary {
+  trace_id: string;
+  root_span: SpanRow;
+  span_count: number;
+  max_duration_ms: number;
+  has_errors: boolean;
+}
+
 export class ScanWarpAPI {
   private client: AxiosInstance;
 
@@ -88,5 +113,30 @@ export class ScanWarpAPI {
     });
     const projects = response.data;
     return projects.length > 0 ? projects[0] : null;
+  }
+
+  async getRecentTraces(options: {
+    projectId: string;
+    limit?: number;
+    status?: 'error' | 'ok';
+  }): Promise<TraceSummary[]> {
+    const response = await this.client.get('/traces', {
+      params: {
+        project_id: options.projectId,
+        limit: options.limit,
+        status: options.status,
+      },
+    });
+    return response.data.traces || [];
+  }
+
+  async getTraceDetail(traceId: string): Promise<SpanRow[]> {
+    const response = await this.client.get(`/traces/${traceId}`);
+    return response.data.spans || [];
+  }
+
+  async getIncidentTraces(incidentId: string): Promise<SpanRow[]> {
+    const response = await this.client.get(`/incidents/${incidentId}/traces`);
+    return response.data.spans || [];
   }
 }

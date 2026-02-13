@@ -16,6 +16,9 @@ import {
   getEvents,
   resolveIncident,
   getFixPrompt,
+  getRecentTraces,
+  getTraceDetail,
+  getTraceForIncident,
 } from './tools.js';
 
 // Parse command line arguments
@@ -193,6 +196,60 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['incident_id'],
         },
       },
+      {
+        name: 'get_recent_traces',
+        description:
+          'List recent request traces from OpenTelemetry instrumentation. Shows root spans with summary info (duration, span count, error status). Filter by status to find failing requests.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            project_id: {
+              type: 'string',
+              description: 'Project ID',
+            },
+            limit: {
+              type: 'number',
+              description: 'Maximum number of traces to return (default: 10)',
+            },
+            status: {
+              type: 'string',
+              description: 'Filter by trace status: "error" for traces with errors, "ok" for successful traces',
+              enum: ['error', 'ok'],
+            },
+          },
+          required: ['project_id'],
+        },
+      },
+      {
+        name: 'get_trace_detail',
+        description:
+          'Get the full request waterfall for a specific trace. Shows all spans as an indented tree with timing, status, and error details. Use this to understand exactly what happened during a request.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            trace_id: {
+              type: 'string',
+              description: 'Trace ID to inspect',
+            },
+          },
+          required: ['trace_id'],
+        },
+      },
+      {
+        name: 'get_trace_for_incident',
+        description:
+          'Get the most relevant trace data for an incident, combined with the AI diagnosis and fix prompt. Shows the request waterfall alongside the root cause analysis.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            incident_id: {
+              type: 'string',
+              description: 'Incident ID',
+            },
+          },
+          required: ['incident_id'],
+        },
+      },
     ],
   };
 });
@@ -266,6 +323,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'get_fix_prompt': {
         const { incident_id } = args as { incident_id: string };
         const result = await getFixPrompt(api, incident_id);
+        return {
+          content: [{ type: 'text', text: result }],
+        };
+      }
+
+      case 'get_recent_traces': {
+        const { project_id, limit, status } = args as {
+          project_id: string;
+          limit?: number;
+          status?: 'error' | 'ok';
+        };
+        const result = await getRecentTraces(api, project_id, { limit, status });
+        return {
+          content: [{ type: 'text', text: result }],
+        };
+      }
+
+      case 'get_trace_detail': {
+        const { trace_id } = args as { trace_id: string };
+        const result = await getTraceDetail(api, trace_id);
+        return {
+          content: [{ type: 'text', text: result }],
+        };
+      }
+
+      case 'get_trace_for_incident': {
+        const { incident_id } = args as { incident_id: string };
+        const result = await getTraceForIncident(api, incident_id);
         return {
           content: [{ type: 'text', text: result }],
         };

@@ -211,6 +211,98 @@ export async function registerOtlpRoutes(
     return { partialSuccess: {} };
   });
 
+  // GET /traces — list recent traces (grouped by trace_id, returning root spans)
+  fastify.get('/traces', async (request, reply) => {
+    const { project_id, limit = 20, status } = request.query as {
+      project_id?: string;
+      limit?: number;
+      status?: 'error' | 'ok';
+    };
+
+    if (!project_id) {
+      reply.code(400);
+      return { error: 'project_id is required' };
+    }
+
+    try {
+      let rootSpans;
+
+      if (status === 'error') {
+        // Find traces that contain at least one ERROR span
+        rootSpans = await sql`
+          SELECT DISTINCT ON (s.trace_id) s.*
+          FROM spans s
+          WHERE s.project_id = ${project_id}
+            AND s.parent_span_id IS NULL
+            AND EXISTS (
+              SELECT 1 FROM spans e
+              WHERE e.trace_id = s.trace_id
+                AND e.status_code = 'ERROR'
+            )
+          ORDER BY s.trace_id, s.start_time ASC
+        `;
+        // Sort by start_time desc and limit
+        rootSpans = rootSpans
+          .sort((a, b) =>
+            Number(b.start_time) - Number(a.start_time))
+          .slice(0, Number(limit));
+      } else if (status === 'ok') {
+        // Find traces with no ERROR spans
+        rootSpans = await sql`
+          SELECT DISTINCT ON (s.trace_id) s.*
+          FROM spans s
+          WHERE s.project_id = ${project_id}
+            AND s.parent_span_id IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM spans e
+              WHERE e.trace_id = s.trace_id
+                AND e.status_code = 'ERROR'
+            )
+          ORDER BY s.trace_id, s.start_time ASC
+        `;
+        rootSpans = rootSpans
+          .sort((a, b) =>
+            Number(b.start_time) - Number(a.start_time))
+          .slice(0, Number(limit));
+      } else {
+        rootSpans = await sql`
+          SELECT * FROM spans
+          WHERE project_id = ${project_id}
+            AND parent_span_id IS NULL
+          ORDER BY start_time DESC
+          LIMIT ${Number(limit)}
+        `;
+      }
+
+      // For each root span, get a summary (span count, has errors, total duration)
+      const traces = [];
+      for (const root of rootSpans) {
+        const stats = await sql`
+          SELECT
+            COUNT(*)::int AS span_count,
+            MAX(duration_ms)::int AS max_duration_ms,
+            BOOL_OR(status_code = 'ERROR') AS has_errors
+          FROM spans
+          WHERE trace_id = ${root.trace_id}
+        `;
+
+        traces.push({
+          trace_id: root.trace_id,
+          root_span: root,
+          span_count: stats[0].span_count,
+          max_duration_ms: stats[0].max_duration_ms,
+          has_errors: stats[0].has_errors,
+        });
+      }
+
+      return { traces };
+    } catch (error) {
+      request.log.error(error);
+      reply.code(500);
+      return { error: 'Failed to fetch traces' };
+    }
+  });
+
   // GET /traces/:traceId — fetch all spans for a trace
   fastify.get<{ Params: { traceId: string } }>('/traces/:traceId', async (request, reply) => {
     const { traceId } = request.params;
@@ -232,6 +324,92 @@ export async function registerOtlpRoutes(
       request.log.error(error);
       reply.code(500);
       return { error: 'Failed to fetch trace' };
+    }
+  });
+
+  // GET /incidents/:id/traces — fetch traces related to an incident
+  fastify.get<{ Params: { id: string } }>('/incidents/:id/traces', async (request, reply) => {
+    const { id } = request.params;
+
+    try {
+      // Fetch the incident's events
+      const incidents = await sql<Array<{
+        events: string[];
+        project_id: string;
+        created_at: Date;
+      }>>`
+        SELECT events, project_id, created_at FROM incidents WHERE id = ${id}
+      `;
+
+      if (incidents.length === 0) {
+        reply.code(404);
+        return { error: 'Incident not found' };
+      }
+
+      const incident = incidents[0];
+      const eventIds = incident.events;
+
+      // Fetch events to find trace IDs
+      const events = await sql<Array<{
+        raw_data: Record<string, unknown> | null;
+        created_at: Date;
+      }>>`
+        SELECT raw_data, created_at FROM events WHERE id = ANY(${eventIds})
+      `;
+
+      // Extract direct trace IDs from event raw_data
+      const traceIds: string[] = [];
+      for (const event of events) {
+        const traceId = event.raw_data?.['trace_id'];
+        if (typeof traceId === 'string') {
+          traceIds.push(traceId);
+        }
+      }
+
+      let spans;
+
+      if (traceIds.length > 0) {
+        spans = await sql`
+          SELECT * FROM spans
+          WHERE trace_id = ANY(${traceIds})
+          ORDER BY start_time ASC
+          LIMIT 200
+        `;
+      } else {
+        // Fallback: time window around the incident
+        const timestamps = events.map((e) => e.created_at.getTime());
+        const minTime = Math.min(...timestamps) - 2 * 60 * 1000;
+        const maxTime = Math.max(...timestamps) + 2 * 60 * 1000;
+
+        const rootSpans = await sql<Array<{ trace_id: string }>>`
+          SELECT DISTINCT trace_id
+          FROM spans
+          WHERE project_id = ${incident.project_id}
+            AND parent_span_id IS NULL
+            AND start_time >= ${minTime}
+            AND start_time <= ${maxTime}
+          ORDER BY start_time DESC
+          LIMIT 5
+        `;
+
+        if (rootSpans.length === 0) {
+          return { incident_id: id, spans: [] };
+        }
+
+        const nearbyTraceIds = rootSpans.map((r) => r.trace_id);
+        spans = await sql`
+          SELECT * FROM spans
+          WHERE trace_id = ANY(${nearbyTraceIds})
+          ORDER BY start_time ASC
+          LIMIT 200
+        `;
+      }
+
+      return { incident_id: id, spans };
+    } catch (error) {
+      request.log.error(error);
+      reply.code(500);
+      return { error: 'Failed to fetch traces for incident' };
     }
   });
 }
