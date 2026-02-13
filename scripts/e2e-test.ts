@@ -4,7 +4,6 @@ import { spawn, ChildProcess } from 'child_process';
 import { promises as fs } from 'fs';
 import { createServer } from 'http';
 import axios from 'axios';
-import * as path from 'path';
 
 // Colors for output
 const colors = {
@@ -18,7 +17,9 @@ const colors = {
 
 // Test results tracking
 const results: { name: string; passed: boolean; message?: string }[] = [];
-let mockWebhookRequests: any[] = [];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockWebhookRequests: any[] = [];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let mockServer: any = null;
 
 function log(message: string, color: string = colors.reset) {
@@ -173,7 +174,7 @@ async function startServer(): Promise<boolean> {
       }
     });
 
-    server.stderr?.on('data', (data) => {
+    server.stderr?.on('data', (_data) => {
       // Ignore stderr for now
     });
 
@@ -346,12 +347,14 @@ async function verifyDiagnosis(projectId: string): Promise<boolean> {
 }
 
 // Verify MCP server
-async function verifyMCP(projectId: string): Promise<boolean> {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function verifyMCP(_projectId: string): Promise<boolean> {
   log('\n=== Verifying MCP Server ===', colors.cyan);
 
   try {
     // Just check that MCP server can start
     // Full integration testing would require MCP client setup
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { execSync } = await import('child_process');
 
     // Check if MCP server binary exists

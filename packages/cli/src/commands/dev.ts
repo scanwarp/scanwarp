@@ -186,6 +186,7 @@ export async function devCommand(options: DevOptions = {}) {
   // Use store's maps for tracking (shared with MCP API)
   const previousResults = store.previousResults;
   const baselines = store.baselines;
+  // eslint-disable-next-line prefer-const
   let watcher: FSWatcher | undefined;
 
   // Handle cleanup
