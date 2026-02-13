@@ -40,6 +40,8 @@ interface StoredEvent {
 interface MemoryStore {
   spans: StoredSpan[];
   events: StoredEvent[];
+  /** Set to true once the initial crawl is done and we should print the live request log */
+  liveLogEnabled: boolean;
 }
 
 // ─── Main dev command ───
@@ -122,6 +124,10 @@ export async function devCommand(options: DevOptions = {}) {
       // Server didn't start in time — that's fine, skip crawl
     });
   }
+
+  // Enable live request log
+  store.liveLogEnabled = true;
+  console.log(chalk.bold.cyan('  Live request log\n'));
 }
 
 // ─── Dev command detection ───
@@ -311,6 +317,7 @@ async function startLocalServer(
   const store: MemoryStore = {
     spans: [],
     events: [],
+    liveLogEnabled: false,
   };
 
   const server = createServer((req, res) => {
@@ -385,9 +392,6 @@ function handleTraceIngest(body: string, store: MemoryStore) {
 
   if (!payload.resourceSpans) return;
 
-  let newErrors = 0;
-  let newSlowQueries = 0;
-
   for (const resourceSpan of payload.resourceSpans) {
     const serviceName = extractServiceName(resourceSpan.resource) || 'unknown';
 
@@ -421,9 +425,13 @@ function handleTraceIngest(body: string, store: MemoryStore) {
 
         store.spans.push(span);
 
-        // Track errors
+        // Live request log — print a line for each SERVER span (incoming HTTP request)
+        if (store.liveLogEnabled && span.kind === 'SERVER') {
+          printRequestLogLine(span);
+        }
+
+        // Track errors (non-SERVER spans that are errors, or SERVER errors already printed above)
         if (statusCode === 'ERROR') {
-          newErrors++;
           const event: StoredEvent = {
             id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             type: 'trace_error',
@@ -434,18 +442,19 @@ function handleTraceIngest(body: string, store: MemoryStore) {
           };
           store.events.push(event);
 
-          // Print error to console in real time
-          console.log(
-            chalk.red(`  ✗ Error: ${span.operation_name} (${durationMs}ms) — ${serviceName}`)
-          );
-          if (otlpSpan.status?.message) {
-            console.log(chalk.gray(`    ${otlpSpan.status.message}`));
+          // Print non-SERVER errors separately (SERVER errors show in the request log)
+          if (!store.liveLogEnabled || span.kind !== 'SERVER') {
+            console.log(
+              chalk.red(`  ✗ Error: ${span.operation_name} (${durationMs}ms) — ${serviceName}`)
+            );
+            if (otlpSpan.status?.message) {
+              console.log(chalk.gray(`    ${otlpSpan.status.message}`));
+            }
           }
         }
 
         // Track slow queries
         if (attributes['db.system'] && durationMs > 1000) {
-          newSlowQueries++;
           const event: StoredEvent = {
             id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             type: 'slow_query',
@@ -456,9 +465,15 @@ function handleTraceIngest(body: string, store: MemoryStore) {
           };
           store.events.push(event);
 
-          console.log(
-            chalk.yellow(`  ⚠ Slow query: ${attributes['db.system']}: ${otlpSpan.name} (${durationMs}ms)`)
-          );
+          if (store.liveLogEnabled) {
+            console.log(
+              chalk.yellow(`           ⚠ slow query: ${attributes['db.system']}: ${otlpSpan.name} (${durationMs}ms)`)
+            );
+          } else {
+            console.log(
+              chalk.yellow(`  ⚠ Slow query: ${attributes['db.system']}: ${otlpSpan.name} (${durationMs}ms)`)
+            );
+          }
         }
       }
     }
@@ -471,6 +486,54 @@ function handleTraceIngest(body: string, store: MemoryStore) {
   if (store.events.length > 1000) {
     store.events = store.events.slice(-1000);
   }
+}
+
+/**
+ * Print a single request log line in the format:
+ *   14:02:01  ✓  GET /api/products   34ms
+ *   14:02:05  ✗  POST /api/checkout   0ms  TypeError: Cannot read...
+ */
+function printRequestLogLine(span: StoredSpan) {
+  const now = new Date(span.start_time);
+  const time = chalk.gray(
+    `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+  );
+
+  const attrs = span.attributes;
+  const method = String(attrs['http.method'] || attrs['http.request.method'] || '???');
+  const route = String(
+    attrs['http.route'] || attrs['http.target'] || attrs['url.path'] || span.operation_name
+  );
+  const httpStatus = attrs['http.status_code'] || attrs['http.response.status_code'];
+
+  const isError =
+    span.status_code === 'ERROR' ||
+    (typeof httpStatus === 'number' && httpStatus >= 400);
+
+  const icon = isError ? chalk.red('✗') : chalk.green('✓');
+
+  const label = `${method} ${route}`;
+  const durationStr = `${span.duration_ms}ms`.padStart(6);
+  const durationColor = span.duration_ms > 1000 ? chalk.yellow(durationStr) : chalk.white(durationStr);
+
+  // Build error suffix
+  let errorSuffix = '';
+  if (isError) {
+    // Try to get an error message from span events
+    const exceptionEvent = span.events.find((e) => e.name === 'exception');
+    const exceptionMsg = exceptionEvent?.attributes?.['exception.message'];
+    if (typeof exceptionMsg === 'string') {
+      const truncated = exceptionMsg.length > 50 ? exceptionMsg.substring(0, 50) + '...' : exceptionMsg;
+      errorSuffix = `  ${chalk.red(truncated)}`;
+    } else if (span.status_message) {
+      const truncated = span.status_message.length > 50 ? span.status_message.substring(0, 50) + '...' : span.status_message;
+      errorSuffix = `  ${chalk.red(truncated)}`;
+    } else if (typeof httpStatus === 'number') {
+      errorSuffix = `  ${chalk.red(String(httpStatus))}`;
+    }
+  }
+
+  console.log(` ${time}  ${icon}  ${label.padEnd(28)} ${durationColor}${errorSuffix}`);
 }
 
 function extractServiceName(resource?: { attributes?: Array<{ key: string; value: { stringValue?: string } }> }): string | undefined {
@@ -607,8 +670,16 @@ async function crawlRoutes(routes: DiscoveredRoutes, port: number) {
     return;
   }
 
-  const results: Array<{ route: string; status: number; timeMs: number }> = [];
-  const errors: Array<{ route: string; error: string }> = [];
+  console.log(chalk.bold('  Initial scan:\n'));
+
+  interface CrawlResult { route: string; status: number; timeMs: number; errorText?: string }
+  interface CrawlError { route: string; error: string }
+
+  const results: CrawlResult[] = [];
+  const errors: CrawlError[] = [];
+
+  // Compute the max route length for alignment
+  const maxRouteLen = Math.max(...staticRoutes.map((r) => `GET ${r}`.length));
 
   for (const route of staticRoutes) {
     try {
@@ -623,7 +694,29 @@ async function crawlRoutes(routes: DiscoveredRoutes, port: number) {
       clearTimeout(timeout);
 
       const timeMs = Date.now() - start;
-      results.push({ route, status: response.status, timeMs });
+
+      // Try to extract error text from non-ok responses
+      let errorText: string | undefined;
+      if (response.status >= 400) {
+        try {
+          const text = await response.text();
+          // Try JSON first
+          try {
+            const json = JSON.parse(text);
+            errorText = json.error || json.message || undefined;
+          } catch {
+            // Use first line of plain text, truncated
+            const firstLine = text.split('\n')[0];
+            if (firstLine && firstLine.length > 0) {
+              errorText = firstLine.length > 60 ? firstLine.substring(0, 60) + '...' : firstLine;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      results.push({ route, status: response.status, timeMs, errorText });
     } catch (err) {
       errors.push({
         route,
@@ -632,24 +725,24 @@ async function crawlRoutes(routes: DiscoveredRoutes, port: number) {
     }
   }
 
-  // Print results
+  // Print results with aligned columns
   for (const r of results) {
-    const statusColor = r.status < 300
-      ? chalk.green
-      : r.status < 400
-        ? chalk.yellow
-        : chalk.red;
-    const timeColor = r.timeMs > 1000
-      ? chalk.yellow
-      : chalk.gray;
+    const isOk = r.status < 400;
+    const icon = isOk ? chalk.green('✓') : chalk.red('✗');
+    const label = `GET ${r.route}`;
+    const padded = label.padEnd(maxRouteLen + 2);
+    const timeStr = `${r.timeMs}ms`.padStart(6);
+    const timeColor = r.timeMs > 1000 ? chalk.yellow(timeStr) : chalk.gray(timeStr);
+    const statusStr = isOk ? '' : `  ${chalk.red(String(r.status))}`;
+    const errStr = r.errorText ? `  ${chalk.gray(r.errorText)}` : '';
 
-    console.log(
-      `  ${statusColor(String(r.status))} ${r.route} ${timeColor(`${r.timeMs}ms`)}`
-    );
+    console.log(`   ${icon} ${padded} ${timeColor}${statusStr}${errStr}`);
   }
 
   for (const e of errors) {
-    console.log(`  ${chalk.red('ERR')} ${e.route} ${chalk.gray(e.error)}`);
+    const label = `GET ${e.route}`;
+    const padded = label.padEnd(maxRouteLen + 2);
+    console.log(`   ${chalk.red('✗')} ${padded} ${chalk.gray('  0ms')}  ${chalk.gray(e.error)}`);
   }
 
   // Summary
@@ -662,7 +755,7 @@ async function crawlRoutes(routes: DiscoveredRoutes, port: number) {
   console.log('');
   console.log(
     chalk.gray(
-      `  ${okCount} ok, ${errCount} errors, avg ${avgTime}ms`
+      `   ${okCount} ok, ${errCount} errors, avg ${avgTime}ms`
     )
   );
 }
