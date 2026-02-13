@@ -7,6 +7,9 @@
   "bin": {
     "scanwarp-mcp": "./dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -17,6 +20,14 @@
   "keywords": ["mcp", "monitoring", "scanwarp"],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scanwarp/scanwarp",
+    "directory": "packages/mcp"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@scanwarp/core": "workspace:*",
