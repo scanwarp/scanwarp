@@ -1,7 +1,7 @@
 {
   "name": "@scanwarp/core",
-  "version": "0.1.0",
-  "description": "Shared types and logic for ScanWarp",
+  "version": "0.3.0",
+  "description": "Shared types and logic for ScanWarp monitoring",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -11,16 +11,29 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "monitoring",
+    "observability",
+    "ai",
+    "claude",
+    "diagnosis",
+    "production",
+    "incidents"
+  ],
+  "author": "ScanWarp",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/scanwarp/scanwarp",
+    "url": "https://github.com/scanwarp/scanwarp.git",
     "directory": "packages/core"
   },
+  "bugs": {
+    "url": "https://github.com/scanwarp/scanwarp/issues"
+  },
+  "homepage": "https://scanwarp.com",
   "publishConfig": {
     "access": "public"
   },

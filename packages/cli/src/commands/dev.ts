@@ -80,6 +80,41 @@ interface RouteFileMap {
 
 // ─── Main dev command ───
 
+// ─── Production setup detection ───
+
+function checkProductionSetup(cwd: string): boolean {
+  // Check if they've deployed or are using hosting platforms
+  const hasVercelConfig = fs.existsSync(path.join(cwd, '.vercel'));
+  const hasRailwayConfig = fs.existsSync(path.join(cwd, 'railway.json')) ||
+                           fs.existsSync(path.join(cwd, 'railway.toml'));
+  const hasRenderConfig = fs.existsSync(path.join(cwd, 'render.yaml'));
+
+  const isUsingHosting = hasVercelConfig || hasRailwayConfig || hasRenderConfig;
+
+  if (!isUsingHosting) {
+    return true; // No hosting detected, so no need to warn
+  }
+
+  // Check if instrumentation is set up
+  const hasInstrumentationFile = fs.existsSync(path.join(cwd, 'instrumentation.ts')) ||
+                                  fs.existsSync(path.join(cwd, 'instrumentation.js'));
+
+  // Check if @scanwarp/instrument is in package.json
+  let hasInstrumentPackage = false;
+  const packageJsonPath = path.join(cwd, 'package.json');
+  if (fs.existsSync(packageJsonPath)) {
+    try {
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+      hasInstrumentPackage = !!(packageJson.dependencies?.['@scanwarp/instrument'] ||
+                                 packageJson.devDependencies?.['@scanwarp/instrument']);
+    } catch {
+      // Ignore parse errors
+    }
+  }
+
+  return hasInstrumentationFile || hasInstrumentPackage;
+}
+
 export async function devCommand(options: DevOptions = {}) {
   const cwd = process.cwd();
 
@@ -91,6 +126,14 @@ export async function devCommand(options: DevOptions = {}) {
   spinner.succeed(
     `Detected: ${detected.framework || 'Node.js'}${detected.services.length > 0 ? ` + ${detected.services.join(', ')}` : ''}`
   );
+
+  // Check for production setup
+  const hasProductionSetup = checkProductionSetup(cwd);
+  if (!hasProductionSetup) {
+    console.log(chalk.yellow('\n⚠️  Production hosting detected but monitoring not configured!'));
+    console.log(chalk.gray('   Run `npx scanwarp init` to enable production monitoring.'));
+    console.log(chalk.gray('   This ensures you get alerts and AI diagnosis in production.\n'));
+  }
 
   // Step 2: Determine the dev command
   const devCmd = options.command || detectDevCommand(detected, cwd);

@@ -19,20 +19,28 @@ export async function setupInstrumentation(
   detected: DetectedProject,
   serverUrl: string,
   projectId: string,
+  shouldPrompt: boolean = true,
 ) {
-  const { enableTracing } = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'enableTracing',
-      message: 'Enable request tracing? (recommended)',
-      default: true,
-    },
-  ]);
+  let enableTracing = true;
+
+  if (shouldPrompt) {
+    const response = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'enableTracing',
+        message: 'Enable request tracing? (recommended)',
+        default: true,
+      },
+    ]);
+    enableTracing = response.enableTracing;
+  }
 
   if (!enableTracing) {
     console.log(chalk.gray('  Skipped\n'));
     return;
   }
+
+  console.log(chalk.gray('  Setting up production instrumentation for monitoring...\n'));
 
   const cwd = process.cwd();
   const isNextJs = detected.framework === 'Next.js';

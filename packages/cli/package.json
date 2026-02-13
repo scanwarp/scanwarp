@@ -1,21 +1,48 @@
 {
-  "name": "@scanwarp/cli",
-  "version": "0.1.0",
-  "description": "ScanWarp CLI tool",
+  "name": "scanwarp",
+  "version": "0.3.0",
+  "description": "Production monitoring built for developers who ship fast. Auto-diagnoses issues with Claude AI.",
   "main": "dist/index.js",
   "bin": {
     "scanwarp": "./dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "monitoring",
+    "observability",
+    "cli",
+    "production",
+    "ai",
+    "claude",
+    "cursor",
+    "diagnosis",
+    "incidents",
+    "vercel",
+    "stripe",
+    "alerts"
+  ],
+  "author": "ScanWarp",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scanwarp/scanwarp.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/scanwarp/scanwarp/issues"
+  },
+  "homepage": "https://scanwarp.com",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.74.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@scanwarp/core": "workspace:*",
     "axios": "^1.13.5",

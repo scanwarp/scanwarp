@@ -1,6 +1,6 @@
 {
   "name": "@scanwarp/instrument",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Zero-config OpenTelemetry auto-instrumentation for Node.js apps monitored by ScanWarp",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,7 +11,8 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "opentelemetry",
@@ -20,13 +21,17 @@
     "tracing",
     "scanwarp"
   ],
-  "author": "",
+  "author": "ScanWarp",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/scanwarp/scanwarp",
+    "url": "https://github.com/scanwarp/scanwarp.git",
     "directory": "packages/instrument"
   },
+  "bugs": {
+    "url": "https://github.com/scanwarp/scanwarp/issues"
+  },
+  "homepage": "https://scanwarp.com",
   "publishConfig": {
     "access": "public"
   },

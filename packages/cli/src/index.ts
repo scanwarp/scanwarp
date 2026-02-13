@@ -7,6 +7,7 @@ import { logsCommand } from './commands/logs.js';
 import { devCommand } from './commands/dev.js';
 import { devMcpCommand } from './commands/dev-mcp.js';
 import { serverCommand } from './commands/server.js';
+import { mcpCommand } from './commands/mcp.js';
 import { config } from './config.js';
 
 const program = new Command();
@@ -14,7 +15,7 @@ const program = new Command();
 program
   .name('scanwarp')
   .description('Your AI writes your code. ScanWarp keeps it running.')
-  .version('0.1.0');
+  .version('0.3.0');
 
 program
   .command('init')
@@ -23,6 +24,7 @@ program
   .option('-u, --url <url>', 'Production URL to monitor')
   .option('--skip-vercel', 'Skip Vercel integration setup')
   .option('--skip-mcp', 'Skip MCP configuration')
+  .option('--skip-instrumentation', 'Skip production instrumentation setup')
   .action(async (options) => {
     try {
       // Use config as fallback for server URL
@@ -121,4 +123,22 @@ program
     console.log('Incidents command coming soon...');
   });
 
+program
+  .command('mcp')
+  .description('Start MCP server for AI coding tools (production monitoring)')
+  .option('-s, --server <url>', 'ScanWarp server URL')
+  .option('-t, --token <token>', 'API token for authentication')
+  .option('-p, --project <id>', 'Default project ID')
+  .action(async (options) => {
+    try {
+      await mcpCommand(options);
+    } catch (error) {
+      console.error('Error:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
 program.parse();
+
+// Re-export from @scanwarp/core for backward compatibility
+export * from '@scanwarp/core';

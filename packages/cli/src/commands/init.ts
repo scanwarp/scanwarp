@@ -16,6 +16,7 @@ interface InitOptions {
   url?: string;
   skipVercel?: boolean;
   skipMcp?: boolean;
+  skipInstrumentation?: boolean;
 }
 
 export async function initCommand(options: InitOptions = {}) {
@@ -154,8 +155,10 @@ export async function initCommand(options: InitOptions = {}) {
   }
 
   // Step 6: Request Tracing
-  console.log(chalk.bold('\n📡 Request Tracing\n'));
-  await setupInstrumentation(detected, serverUrl, projectId);
+  if (!options.skipInstrumentation) {
+    console.log(chalk.bold('\n📡 Request Tracing\n'));
+    await setupInstrumentation(detected, serverUrl, projectId, false); // false = don't prompt, install by default
+  }
 
   // Step 7: MCP Configuration
   if (!options.skipMcp) {
