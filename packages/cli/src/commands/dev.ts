@@ -7,6 +7,7 @@ import { createServer, type Server } from 'http';
 import { watch as chokidarWatch, type FSWatcher } from 'chokidar';
 import { detectProject, type DetectedProject } from '../detector.js';
 import { AnalysisEngine } from '../dev/analysis-engine.js';
+import { SchemaTracker } from '../dev/analyzers/schema-drift.js';
 
 interface DevOptions {
   command?: string;
@@ -52,6 +53,8 @@ interface MemoryStore {
   previousResults: Map<string, RouteCheckResult>;
   /** Baseline response times per route */
   baselines: Map<string, number>;
+  /** Schema tracker for API response drift detection */
+  schemaTracker: SchemaTracker;
   /** Timestamp when dev mode started */
   startedAt: number;
 }
@@ -63,6 +66,8 @@ interface RouteCheckResult {
   status: number;
   timeMs: number;
   errorText?: string;
+  /** Parsed JSON body for 2xx API routes (used for schema drift detection) */
+  responseBody?: unknown;
 }
 
 /** Maps a route path to its source file (for file-change → route mapping) */
@@ -174,7 +179,7 @@ export async function devCommand(options: DevOptions = {}) {
       if (ready) {
         console.log(chalk.gray('\n─'.repeat(60)));
         console.log(chalk.bold.cyan('\n  Initial route check\n'));
-        const initialResults = await crawlRoutes(routes, devServerPort);
+        const initialResults = await crawlRoutes(routes, devServerPort, store.schemaTracker);
 
         // Store initial results as both previous and baseline
         for (const r of initialResults) {
@@ -193,7 +198,7 @@ export async function devCommand(options: DevOptions = {}) {
   }
 
   // Step 7: Start file watcher
-  watcher = startFileWatcher(cwd, routes, routeFileMap, previousResults, baselines, devServerPort);
+  watcher = startFileWatcher(cwd, routes, routeFileMap, previousResults, baselines, store.schemaTracker, devServerPort);
 
   // Enable live request log
   store.liveLogEnabled = true;
@@ -409,6 +414,7 @@ async function startLocalServer(
     routes: { pages: [], apiRoutes: [] },
     previousResults: new Map(),
     baselines: new Map(),
+    schemaTracker: new SchemaTracker(),
     startedAt: Date.now(),
   };
 
@@ -906,7 +912,7 @@ async function waitForServer(port: number, timeoutMs: number): Promise<boolean> 
 
 // ─── Route crawling ───
 
-async function crawlRoutes(routes: DiscoveredRoutes, port: number): Promise<RouteCheckResult[]> {
+async function crawlRoutes(routes: DiscoveredRoutes, port: number, schemaTracker?: SchemaTracker): Promise<RouteCheckResult[]> {
   const allGetRoutes = [
     ...routes.pages,
     ...routes.apiRoutes.filter((r) => !r.includes('[') || !r.includes(']')),
@@ -925,7 +931,7 @@ async function crawlRoutes(routes: DiscoveredRoutes, port: number): Promise<Rout
   console.log(chalk.bold('  Initial scan:\n'));
 
   const checkResults = await checkRoutes(staticRoutes, port);
-  printRouteResults(checkResults);
+  printRouteResults(checkResults, { schemaTracker });
 
   return checkResults;
 }
@@ -950,6 +956,8 @@ async function checkRoutes(routes: string[], port: number): Promise<RouteCheckRe
 
       // Try to extract error text from non-ok responses
       let errorText: string | undefined;
+      let responseBody: unknown | undefined;
+
       if (response.status >= 400) {
         try {
           const text = await response.text();
@@ -965,9 +973,19 @@ async function checkRoutes(routes: string[], port: number): Promise<RouteCheckRe
         } catch {
           // ignore
         }
+      } else if (response.status >= 200 && response.status < 300 && route.startsWith('/api/')) {
+        // Read JSON body for 2xx API routes (schema drift detection)
+        try {
+          const contentType = response.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            responseBody = await response.json();
+          }
+        } catch {
+          // Not valid JSON — skip
+        }
       }
 
-      results.push({ route, method: 'GET', status: response.status, timeMs, errorText });
+      results.push({ route, method: 'GET', status: response.status, timeMs, errorText, responseBody });
     } catch (err) {
       results.push({
         route,
@@ -987,6 +1005,8 @@ interface PrintRouteOptions {
   baselines?: Map<string, number>;
   /** When true, only print routes with changes/errors/slow regressions */
   quiet?: boolean;
+  /** Schema tracker for API response drift detection */
+  schemaTracker?: SchemaTracker;
 }
 
 /** Print route check results with aligned columns */
@@ -1078,6 +1098,16 @@ function printRouteResults(results: RouteCheckResult[], opts: PrintRouteOptions 
       `   ${okCount} ok, ${errCount} errors, avg ${avgTime}ms`
     )
   );
+
+  // Schema drift detection for API routes
+  if (opts.schemaTracker) {
+    for (const r of results) {
+      if (r.responseBody !== undefined && r.status >= 200 && r.status < 300) {
+        const diffs = opts.schemaTracker.processResponse(r.route, r.method, r.responseBody);
+        SchemaTracker.printDrift(r.route, r.method, diffs);
+      }
+    }
+  }
 }
 
 // ─── File watcher ───
@@ -1088,6 +1118,7 @@ function startFileWatcher(
   routeFileMap: RouteFileMap,
   previousResults: Map<string, RouteCheckResult>,
   baselines: Map<string, number>,
+  schemaTracker: SchemaTracker,
   devServerPort: number,
 ): FSWatcher {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1115,6 +1146,9 @@ function startFileWatcher(
       const affectedRoutes = resolveAffectedRoutes(changedFiles, routes, routeFileMap);
       if (affectedRoutes.length === 0) return;
 
+      // Reset schema baselines for routes whose handler files changed
+      schemaTracker.resetForRoutes(affectedRoutes);
+
       const fileNames = [...changedFiles].map((f) => path.relative(cwd, f)).join(', ');
       console.log('');
       console.log(chalk.gray('─'.repeat(60)));
@@ -1122,7 +1156,7 @@ function startFileWatcher(
       console.log(chalk.bold(`  Re-checking ${affectedRoutes.length} route${affectedRoutes.length > 1 ? 's' : ''}...\n`));
 
       const newResults = await checkRoutes(affectedRoutes, devServerPort);
-      printRouteResults(newResults, { previousResults, baselines, quiet: true });
+      printRouteResults(newResults, { previousResults, baselines, quiet: true, schemaTracker });
 
       // Update previous results and baselines
       for (const r of newResults) {
