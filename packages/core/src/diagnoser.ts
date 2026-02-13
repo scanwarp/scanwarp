@@ -6,6 +6,13 @@ interface DiagnoserConfig {
   model?: string;
 }
 
+interface ProviderStatusContext {
+  provider: string;
+  displayName: string;
+  status: string;
+  description: string | null;
+}
+
 interface DiagnosisContext {
   events: Event[];
   monitor?: Monitor;
@@ -15,6 +22,7 @@ interface DiagnosisContext {
     message: string;
   }>;
   traces?: TraceSpan[];
+  providerStatuses?: ProviderStatusContext[];
 }
 
 export { type DiagnosisContext };
@@ -56,8 +64,9 @@ export class Diagnoser {
 
   private getSystemPrompt(context: DiagnosisContext): string {
     const hasTraces = context.traces && context.traces.length > 0;
+    const hasProviderIssues = context.providerStatuses && context.providerStatuses.length > 0;
 
-    return `You are a senior engineering mentor helping developers who built their application using AI coding tools like Cursor or Claude Code. These developers may not have deep infrastructure knowledge or be familiar with reading stack traces.
+    let prompt = `You are a senior engineering mentor helping developers who built their application using AI coding tools like Cursor or Claude Code. These developers may not have deep infrastructure knowledge or be familiar with reading stack traces.
 
 Your job is to:
 1. Explain what went wrong in plain, conversational English (no jargon)
@@ -72,7 +81,20 @@ IMPORTANT RULES:
 - NO raw stack traces in your response
 - Use analogies when helpful
 - Be encouraging, not condescending
-- Focus on "what to do" not "what you did wrong"${hasTraces ? '\n- When trace data is available, use it to pinpoint the EXACT operation that failed or is slow' : ''}
+- Focus on "what to do" not "what you did wrong"${hasTraces ? '\n- When trace data is available, use it to pinpoint the EXACT operation that failed or is slow' : ''}`;
+
+    if (hasProviderIssues) {
+      prompt += `
+
+PROVIDER OUTAGE RULES (CRITICAL — follow these when provider status data shows a non-operational provider):
+- If the issue correlates with a provider that is currently experiencing an outage or degraded performance, clearly state that the issue is CAUSED BY the provider outage, NOT a bug in the user's code
+- The root_cause MUST mention the provider by name and their current status (e.g. "This is caused by a Vercel outage, not a bug in your code")
+- The suggested_fix should focus on: (1) waiting for the provider to recover, (2) checking the provider's status page, and (3) any temporary workarounds
+- Do NOT suggest code fixes for issues caused by provider outages — it's not the user's fault
+- The fix_prompt should suggest adding resilience improvements (retry logic, fallbacks, circuit breakers) as an OPTIONAL improvement, not as a bug fix`;
+    }
+
+    prompt += `
 
 Respond in this exact JSON format:
 {
@@ -91,12 +113,25 @@ The fix_prompt should be detailed and include:
 - How to test the fix
 
 Make the fix_prompt actionable enough that an AI coding assistant can implement it without asking follow-up questions.`;
+
+    return prompt;
   }
 
   private buildPrompt(context: DiagnosisContext): string {
-    const { events, monitor, recentHistory, traces } = context;
+    const { events, monitor, recentHistory, traces, providerStatuses } = context;
 
     let prompt = '## Production Issue Detected\n\n';
+
+    // Provider status section — show this first so the AI sees it immediately
+    if (providerStatuses && providerStatuses.length > 0) {
+      prompt += '**⚠️ Provider Status (current):**\n';
+      for (const ps of providerStatuses) {
+        const statusLabel = ps.status === 'operational' ? '✅ operational' : `🔴 ${ps.status}`;
+        const detail = ps.description ? ` — ${ps.description}` : '';
+        prompt += `- ${ps.displayName}: ${statusLabel}${detail}\n`;
+      }
+      prompt += '\nNote: One or more infrastructure providers are experiencing issues. Consider whether this incident is caused by the provider outage rather than a code bug.\n\n';
+    }
 
     // Add monitor context if available
     if (monitor) {

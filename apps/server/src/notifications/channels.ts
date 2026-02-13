@@ -18,6 +18,8 @@ export interface NotificationPayload {
     message: string;
     created_at: Date;
   }>;
+  isProviderIssue?: boolean;
+  affectedProviders?: string[];
 }
 
 export abstract class Channel {
@@ -58,7 +60,7 @@ export abstract class Channel {
 
 export class DiscordChannel extends Channel {
   async send(payload: NotificationPayload): Promise<void> {
-    const { incident, correlatedEvents } = payload;
+    const { incident, correlatedEvents, isProviderIssue, affectedProviders } = payload;
     const emoji = this.getSeverityEmoji(incident.severity);
     const color = this.getSeverityColor(incident.severity);
 
@@ -114,9 +116,22 @@ export class DiscordChannel extends Channel {
       }
     );
 
+    // Provider issue badge
+    if (isProviderIssue && affectedProviders && affectedProviders.length > 0) {
+      fields.unshift({
+        name: '☁️ Provider Issue',
+        value: `Likely caused by: ${affectedProviders.join(', ')}`,
+        inline: false,
+      });
+    }
+
+    const providerBadge = isProviderIssue ? ' ☁️ Provider Issue' : '';
+
     const embed = {
-      title: `${emoji} ScanWarp — ${incident.severity.toUpperCase()} Incident`,
-      description: `Incident detected in your application`,
+      title: `${emoji} ScanWarp — ${incident.severity.toUpperCase()} Incident${providerBadge}`,
+      description: isProviderIssue
+        ? `This incident appears to be caused by a provider outage, not a bug in your code.`
+        : `Incident detected in your application`,
       color,
       fields,
       footer: {
@@ -144,19 +159,32 @@ export class DiscordChannel extends Channel {
 
 export class SlackChannel extends Channel {
   async send(payload: NotificationPayload): Promise<void> {
-    const { incident, correlatedEvents } = payload;
+    const { incident, correlatedEvents, isProviderIssue, affectedProviders } = payload;
     const emoji = this.getSeverityEmoji(incident.severity);
 
     const blocks: any[] = [];
+
+    const providerBadge = isProviderIssue ? ' ☁️ Provider Issue' : '';
 
     // Header
     blocks.push({
       type: 'header',
       text: {
         type: 'plain_text',
-        text: `${emoji} ScanWarp ${incident.severity.toUpperCase()} Incident`,
+        text: `${emoji} ScanWarp ${incident.severity.toUpperCase()} Incident${providerBadge}`,
       },
     });
+
+    // Provider issue callout
+    if (isProviderIssue && affectedProviders && affectedProviders.length > 0) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*☁️ Provider Issue:* This incident appears to be caused by a provider outage (${affectedProviders.join(', ')}), not a bug in your code.`,
+        },
+      });
+    }
 
     // What happened
     if (incident.diagnosis_text) {

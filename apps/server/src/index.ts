@@ -14,6 +14,7 @@ import { registerStripeWebhook } from './integrations/stripe.js';
 import { registerGitHubWebhook } from './integrations/github.js';
 import { registerOtlpRoutes } from './integrations/otlp.js';
 import { NotificationManager } from './notifications/manager.js';
+import { ProviderStatusTracker } from './providers/status.js';
 
 const db = createDatabase();
 
@@ -60,6 +61,10 @@ const anomalyDetector = new AnomalyDetector(db);
 const incidentService = new IncidentService(db, process.env.ANTHROPIC_API_KEY);
 const statusChecker = new StatusChecker(db);
 const notificationManager = new NotificationManager(db);
+const providerTracker = new ProviderStatusTracker();
+
+// Wire provider tracker into incident service for outage correlation
+incidentService.setProviderTracker(providerTracker);
 
 // Initialize optional integrations based on env vars
 let supabasePoller: SupabasePoller | null = null;
@@ -76,6 +81,23 @@ if (process.env.SUPABASE_PROJECT_REF && process.env.SUPABASE_SERVICE_KEY) {
 
 fastify.get('/health', async () => {
   return { status: 'ok', timestamp: new Date().toISOString() };
+});
+
+fastify.get('/provider-status', async () => {
+  const statuses = providerTracker.getAll();
+  const nonOperational = providerTracker.getNonOperational();
+
+  return {
+    providers: statuses.map((s) => ({
+      provider: s.provider,
+      displayName: s.displayName,
+      status: s.status,
+      description: s.description,
+      lastCheckedAt: s.lastCheckedAt.toISOString(),
+    })),
+    hasIssues: nonOperational.length > 0,
+    issueCount: nonOperational.length,
+  };
 });
 
 // Register provider webhooks
@@ -406,8 +428,11 @@ const start = async () => {
     // Start the monitoring engine
     await monitorRunner.start();
 
-    // Start the provider status checker
+    // Start the provider status checker (DB-backed)
     await statusChecker.start();
+
+    // Start the in-memory provider status tracker (for incident correlation)
+    await providerTracker.start();
 
     // Start optional integrations
     if (supabasePoller) {
@@ -426,6 +451,7 @@ process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down gracefully...');
   await monitorRunner.stop();
   await statusChecker.stop();
+  await providerTracker.stop();
   if (supabasePoller) {
     await supabasePoller.stop();
   }

@@ -10,7 +10,10 @@ import {
 export class NotificationManager {
   constructor(private db: Database) {}
 
-  async notify(incident: Incident): Promise<void> {
+  async notify(
+    incident: Incident,
+    providerContext?: { isProviderIssue: boolean; affectedProviders: string[] }
+  ): Promise<void> {
     // Get enabled channels for this project
     const rows = await this.db.getEnabledChannels(incident.project_id);
     const channels: NotificationChannel[] = rows.map((r) => ({
@@ -44,6 +47,8 @@ export class NotificationManager {
     const payload: NotificationPayload = {
       incident,
       correlatedEvents,
+      isProviderIssue: providerContext?.isProviderIssue,
+      affectedProviders: providerContext?.affectedProviders,
     };
 
     // Send to all channels with rate limiting

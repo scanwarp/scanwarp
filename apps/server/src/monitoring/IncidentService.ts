@@ -1,11 +1,13 @@
 import type { Database } from '../db/index.js';
 import { Diagnoser, type Event, type Monitor, type Incident, type TraceSpan } from '@scanwarp/core';
 import { NotificationManager } from '../notifications/manager.js';
+import type { ProviderStatusTracker } from '../providers/status.js';
 
 export class IncidentService {
   private db: Database;
   private diagnoser: Diagnoser | null = null;
   private notificationManager: NotificationManager;
+  private providerTracker: ProviderStatusTracker | null = null;
 
   constructor(db: Database, apiKey?: string) {
     this.db = db;
@@ -17,6 +19,10 @@ export class IncidentService {
     } else {
       console.warn('ANTHROPIC_API_KEY not set - AI diagnosis will be disabled');
     }
+  }
+
+  setProviderTracker(tracker: ProviderStatusTracker) {
+    this.providerTracker = tracker;
   }
 
   async createIncident(eventIds: string[]): Promise<string> {
@@ -112,6 +118,36 @@ export class IncidentService {
     // Fetch related traces from the spans table
     const traces = await this.fetchRelatedTraces(events);
 
+    // Check provider statuses for correlation
+    let providerStatuses: Array<{
+      provider: string;
+      displayName: string;
+      status: string;
+      description: string | null;
+    }> | undefined;
+    let isProviderIssue = false;
+    let affectedProviderNames: string[] = [];
+
+    if (this.providerTracker) {
+      const affected = this.providerTracker.getAffectedProviders(
+        eventObjects.map((e) => ({ source: e.source, message: e.message }))
+      );
+
+      if (affected.length > 0) {
+        providerStatuses = affected.map((a) => ({
+          provider: a.provider,
+          displayName: a.displayName,
+          status: a.status,
+          description: a.description,
+        }));
+        isProviderIssue = true;
+        affectedProviderNames = affected.map((a) => a.displayName);
+        console.log(
+          `Provider outage detected for incident ${incidentId}: ${affectedProviderNames.join(', ')}`
+        );
+      }
+    }
+
     // Call the diagnoser
     const diagnosis = await this.diagnoser!.diagnose({
       events: eventObjects,
@@ -122,6 +158,7 @@ export class IncidentService {
         message: h.message,
       })),
       traces,
+      providerStatuses,
     });
 
     // Update the incident with diagnosis
@@ -133,7 +170,10 @@ export class IncidentService {
     const updatedIncident = await this.getIncident(incidentId);
     if (updatedIncident) {
       try {
-        await this.notificationManager.notify(updatedIncident);
+        await this.notificationManager.notify(updatedIncident, {
+          isProviderIssue,
+          affectedProviders: affectedProviderNames,
+        });
       } catch (error) {
         console.error('Failed to send notifications:', error);
         // Don't fail the diagnosis if notifications fail
