@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import { initCommand } from './commands/init.js';
 import { statusCommand } from './commands/status.js';
 import { logsCommand } from './commands/logs.js';
+import { devCommand } from './commands/dev.js';
 import { config } from './config.js';
 
 const program = new Command();
@@ -59,6 +60,21 @@ program
       options.server = options.server || config.getServerUrl();
       options.limit = parseInt(options.limit);
       await logsCommand(options);
+    } catch (error) {
+      console.error('Error:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('dev')
+  .description('Start your dev server with ScanWarp monitoring')
+  .option('-c, --command <cmd>', 'Dev server command to run (auto-detected if omitted)')
+  .option('-p, --port <number>', 'Port for local ScanWarp server')
+  .action(async (options) => {
+    try {
+      if (options.port) options.port = parseInt(options.port);
+      await devCommand(options);
     } catch (error) {
       console.error('Error:', error instanceof Error ? error.message : error);
       process.exit(1);
