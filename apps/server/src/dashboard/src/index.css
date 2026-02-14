@@ -1,3 +1,156 @@
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-sand-light text-brown-darker font-sans antialiased;
+    line-height: 1.7;
+  }
+
+  /* Scanline overlay */
+  body::after {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 9999;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.015) 2px,
+      rgba(0, 0, 0, 0.015) 4px
+    );
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #D4C4A8;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #6d5537;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-cream border-[3px] border-brown-dark transition-all duration-150;
+  }
+  .card:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: 2px 2px 0 #5C4A32;
+  }
+
+  .stat-card {
+    @apply card p-5 relative overflow-hidden;
+  }
+  .stat-card::before {
+    content: '';
+    @apply absolute top-0 left-0 right-0 h-[3px] bg-accent-orange;
+  }
+
+  .nav-link {
+    @apply px-3 py-2 text-sm font-medium transition-all duration-150 flex items-center gap-2 uppercase;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 1px;
+  }
+  .nav-link-active {
+    @apply text-accent-orange bg-cream;
+    border: 2px solid #5C4A32;
+  }
+  .nav-link-inactive {
+    @apply text-brown;
+    border: 2px solid transparent;
+  }
+  .nav-link-inactive:hover {
+    @apply text-accent-orange;
+    background: #E8DCC8;
+  }
+
+  .filter-select {
+    @apply bg-cream border-[2px] border-brown-dark px-3 py-1.5 text-brown-dark
+           focus:outline-none focus:border-accent-orange
+           transition-all duration-150 appearance-none cursor-pointer;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.8rem;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%235C4A32' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1.5em 1.5em;
+    padding-right: 2rem;
+  }
+
+  .section-title {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    @apply text-accent-orange uppercase;
+    letter-spacing: 4px;
+  }
+
+  .link-brand {
+    @apply text-accent-orange transition-colors;
+    font-family: 'Space Mono', monospace;
+  }
+  .link-brand:hover {
+    color: #E8863E;
+  }
+
+  .btn-primary {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    @apply bg-accent-orange text-cream px-5 py-3 border-[3px] border-brown-dark uppercase transition-all duration-150 cursor-pointer inline-block;
+    letter-spacing: 1px;
+  }
+  .btn-primary:hover {
+    transform: translate(-3px, -3px);
+    box-shadow: 3px 3px 0 #5C4A32;
+    background: #E8863E;
+  }
+
+  .btn-success {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    @apply bg-accent-green text-cream px-5 py-3 border-[3px] border-brown-dark uppercase transition-all duration-150 cursor-pointer inline-block;
+    letter-spacing: 1px;
+  }
+  .btn-success:hover {
+    transform: translate(-3px, -3px);
+    box-shadow: 3px 3px 0 #5C4A32;
+    background: #6DBF5A;
+  }
+
+  .terminal {
+    @apply bg-charcoal border-[3px] border-brown-dark p-5 relative;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.85rem;
+    line-height: 2;
+    color: #E8DCC8;
+  }
+  .terminal-label {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.4rem;
+    @apply absolute -top-2.5 left-3 bg-charcoal text-brown px-2 uppercase;
+    letter-spacing: 2px;
+  }
+  .terminal .prompt { color: #E8863E; }
+  .terminal .success { color: #6DBF5A; }
+
+  .pixel-heading {
+    font-family: 'Press Start 2P', monospace;
+    line-height: 1.8;
+    text-shadow: 1px 1px 0 #E8DCC8, -1px -1px 0 rgba(255,255,255,0.5);
+  }
+}

@@ -3,8 +3,38 @@ import { api } from '../api';
 import { Badge } from '../components/Badge';
 import { usePolling, timeAgo } from '../hooks';
 
-const TYPE_OPTIONS = ['', 'error', 'down', 'up', 'slow', 'trace_error', 'slow_query'];
-const SOURCE_OPTIONS = ['', 'monitor', 'otel', 'github', 'stripe', 'supabase', 'vercel', 'provider-status'];
+/* Human-readable filter options */
+const TYPE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '', label: 'All types' },
+  { value: 'error', label: 'Errors' },
+  { value: 'down', label: 'Service went offline' },
+  { value: 'up', label: 'Service came back online' },
+  { value: 'slow', label: 'Slow responses' },
+  { value: 'trace_error', label: 'Code errors' },
+  { value: 'slow_query', label: 'Slow database queries' },
+];
+
+const SOURCE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '', label: 'All sources' },
+  { value: 'monitor', label: 'Health checks' },
+  { value: 'otel', label: 'App code' },
+  { value: 'github', label: 'GitHub' },
+  { value: 'stripe', label: 'Stripe' },
+  { value: 'supabase', label: 'Supabase' },
+  { value: 'vercel', label: 'Vercel' },
+  { value: 'provider-status', label: 'External services' },
+];
+
+const sourceLabels: Record<string, string> = {
+  monitor: 'Health Check',
+  otel: 'App Code',
+  github: 'GitHub',
+  stripe: 'Stripe',
+  supabase: 'Supabase',
+  vercel: 'Vercel',
+  'provider-status': 'External Service',
+  browser: 'Browser',
+};
 
 export function Events() {
   const [typeFilter, setTypeFilter] = useState('');
@@ -22,46 +52,58 @@ export function Events() {
   const events = data?.events ?? [];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
+      {/* Header */}
+      <div>
+        <h1 className="pixel-heading text-brown-darker" style={{ fontSize: 'clamp(0.8rem, 2vw, 1.1rem)' }}>Activity Feed</h1>
+        <p className="text-sm text-brown mt-1">Everything happening across your app — errors, slowdowns, status changes, and more.</p>
+      </div>
+
+      {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-bold">Events</h1>
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300"
+          className="filter-select"
         >
-          <option value="">All types</option>
-          {TYPE_OPTIONS.filter(Boolean).map((t) => (
-            <option key={t} value={t}>{t}</option>
+          {TYPE_OPTIONS.map((t) => (
+            <option key={t.value} value={t.value}>{t.label}</option>
           ))}
         </select>
         <select
           value={sourceFilter}
           onChange={(e) => setSourceFilter(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300"
+          className="filter-select"
         >
-          <option value="">All sources</option>
-          {SOURCE_OPTIONS.filter(Boolean).map((s) => (
-            <option key={s} value={s}>{s}</option>
+          {SOURCE_OPTIONS.map((s) => (
+            <option key={s.value} value={s.value}>{s.label}</option>
           ))}
         </select>
-        <span className="text-xs text-gray-500 ml-auto">Polling every 10s</span>
+        <span className="text-xs text-brown ml-auto flex items-center gap-1.5">
+          <span className="w-2 h-2 bg-accent-green animate-blink" />
+          Live — updates every 10s
+        </span>
       </div>
 
       {loading && events.length === 0 ? (
-        <p className="text-gray-500 text-sm">Loading...</p>
+        <p className="text-brown text-sm">Loading activity...</p>
       ) : events.length === 0 ? (
-        <p className="text-gray-500 text-sm">No events found</p>
+        <div className="card p-8 text-center">
+          <p className="text-brown-dark">No activity found</p>
+          <p className="text-xs text-brown mt-1">Try changing your filters or check back later.</p>
+        </div>
       ) : (
-        <div className="bg-gray-900 rounded-lg border border-gray-800 divide-y divide-gray-800">
+        <div className="card divide-y divide-sand-dark">
           {events.map((e) => (
-            <div key={e.id} className="p-3 flex items-start gap-2">
-              <Badge label={e.type} />
-              <Badge label={e.severity} />
+            <div key={e.id} className="p-4 flex items-start gap-3 hover:bg-sand-dark/30 transition-colors">
+              <div className="flex flex-col gap-1 shrink-0 pt-0.5">
+                <Badge label={e.type} />
+                <Badge label={e.severity} />
+              </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm">{e.message}</p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {e.source} &middot; {timeAgo(e.created_at)}
+                <p className="text-xs text-brown mt-1">
+                  from <span className="text-brown-dark font-mono">{sourceLabels[e.source] || e.source}</span> · {timeAgo(e.created_at)}
                 </p>
               </div>
             </div>

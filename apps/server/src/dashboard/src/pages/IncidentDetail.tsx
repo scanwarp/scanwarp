@@ -4,6 +4,17 @@ import { Badge } from '../components/Badge';
 import { TraceWaterfall } from '../components/TraceWaterfall';
 import { useFetch, timeAgo } from '../hooks';
 
+const sourceLabels: Record<string, string> = {
+  monitor: 'Health Check',
+  otel: 'App Code',
+  github: 'GitHub',
+  stripe: 'Stripe',
+  supabase: 'Supabase',
+  vercel: 'Vercel',
+  'provider-status': 'External Service',
+  browser: 'Browser',
+};
+
 export function IncidentDetail() {
   const { id } = useParams<{ id: string }>();
   const incident = useFetch(() => api.getIncident(id!), [id]);
@@ -13,8 +24,8 @@ export function IncidentDetail() {
   const incidentEvents = incident.data?.events ?? [];
   const spans = traces.data?.spans ?? [];
 
-  if (incident.loading) return <p className="text-gray-500 text-sm">Loading...</p>;
-  if (!inc) return <p className="text-gray-500 text-sm">Incident not found</p>;
+  if (incident.loading) return <p className="text-brown text-sm">Loading issue details...</p>;
+  if (!inc) return <p className="text-brown text-sm">Issue not found</p>;
 
   const handleResolve = async () => {
     try {
@@ -27,79 +38,86 @@ export function IncidentDetail() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div>
-        <Link to="/incidents" className="text-xs text-blue-400 hover:underline">&larr; Incidents</Link>
-        <div className="flex items-center gap-3 mt-2">
-          <h1 className="text-xl font-bold">Incident</h1>
+        <Link to="/incidents" className="link-brand text-xs">&larr; Back to Issues</Link>
+        <div className="flex items-center gap-3 mt-3 flex-wrap">
+          <h1 className="pixel-heading text-brown-darker" style={{ fontSize: 'clamp(0.8rem, 2vw, 1.1rem)' }}>Issue Details</h1>
           <Badge label={inc.status} />
           <Badge label={inc.severity} />
           {inc.status === 'open' && (
-            <button
-              onClick={handleResolve}
-              className="ml-auto px-3 py-1 text-sm bg-green-600 hover:bg-green-500 text-white rounded transition-colors"
-            >
-              Resolve
+            <button onClick={handleResolve} className="btn-success ml-auto">
+              Mark as Fixed
             </button>
           )}
         </div>
-        <p className="text-xs text-gray-500 mt-1">
-          Created {timeAgo(inc.created_at)}
-          {inc.resolved_at && <> &middot; Resolved {timeAgo(inc.resolved_at)}</>}
+        <p className="text-sm text-brown mt-1">
+          Detected {timeAgo(inc.created_at)}
+          {inc.resolved_at && <> · Fixed {timeAgo(inc.resolved_at)}</>}
         </p>
       </div>
 
-      {/* AI Diagnosis */}
+      {/* AI Diagnosis — the core value prop */}
       {(inc.diagnosis_text || inc.diagnosis_fix || inc.fix_prompt) && (
         <section className="space-y-4">
-          <h2 className="font-semibold text-gray-300">AI Diagnosis</h2>
+          <div>
+            <h2 className="section-title">What ScanWarp Found</h2>
+            <p className="text-xs text-brown mt-0.5">AI analyzed the errors and figured out what's going on.</p>
+          </div>
 
           {inc.diagnosis_text && (
-            <div className="bg-gray-900 rounded-lg border border-gray-800 p-4">
-              <p className="text-xs text-gray-500 uppercase mb-2">Root Cause</p>
-              <p className="text-sm text-gray-200 whitespace-pre-wrap">{inc.diagnosis_text}</p>
+            <div className="terminal">
+              <span className="terminal-label">Why this happened</span>
+              <p className="whitespace-pre-wrap leading-relaxed mt-2">{inc.diagnosis_text}</p>
             </div>
           )}
 
           {inc.diagnosis_fix && (
-            <div className="bg-gray-900 rounded-lg border border-gray-800 p-4">
-              <p className="text-xs text-gray-500 uppercase mb-2">Suggested Fix</p>
-              <p className="text-sm text-gray-200 whitespace-pre-wrap">{inc.diagnosis_fix}</p>
+            <div className="terminal">
+              <span className="terminal-label">How to fix it</span>
+              <p className="whitespace-pre-wrap leading-relaxed mt-2 success">{inc.diagnosis_fix}</p>
             </div>
           )}
 
           {inc.fix_prompt && (
-            <div className="bg-gray-900 rounded-lg border border-blue-800/50 p-4">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs text-blue-400 uppercase">Fix Prompt (for Cursor/Claude Code)</p>
+            <div className="terminal">
+              <span className="terminal-label">Auto-fix prompt</span>
+              <div className="flex items-center justify-between mb-3 mt-2">
+                <p className="text-xs text-sand-dark">Copy this and paste it into Cursor or Claude Code to fix automatically</p>
                 <button
                   onClick={() => navigator.clipboard.writeText(inc.fix_prompt!)}
-                  className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                  className="btn-primary text-xs"
                 >
-                  Copy
+                  Copy prompt
                 </button>
               </div>
-              <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono bg-gray-950 rounded p-3">
-                {inc.fix_prompt}
-              </pre>
+              <pre className="whitespace-pre-wrap prompt bg-brown-darker/50 border-[2px] border-brown-dark p-4">{inc.fix_prompt}</pre>
             </div>
           )}
         </section>
       )}
 
-      {/* Correlated Events */}
+      {/* Related Events */}
       <section>
-        <h2 className="font-semibold text-gray-300 mb-3">Correlated Events ({incidentEvents.length})</h2>
-        <div className="bg-gray-900 rounded-lg border border-gray-800 divide-y divide-gray-800">
+        <div className="mb-3">
+          <h2 className="section-title">Related Events ({incidentEvents.length})</h2>
+          <p className="text-xs text-brown mt-0.5">All the errors and events connected to this issue</p>
+        </div>
+        <div className="card divide-y divide-sand-dark">
           {incidentEvents.length === 0 ? (
-            <p className="p-4 text-gray-500 text-sm">No events</p>
+            <p className="p-5 text-brown text-sm text-center">No related events found</p>
           ) : (
             incidentEvents.map((e) => (
-              <div key={e.id} className="p-3 flex items-start gap-2">
-                <Badge label={e.type} />
-                <Badge label={e.severity} />
+              <div key={e.id} className="p-4 flex items-start gap-3">
+                <div className="flex flex-col gap-1 shrink-0 pt-0.5">
+                  <Badge label={e.type} />
+                  <Badge label={e.severity} />
+                </div>
                 <div className="min-w-0">
                   <p className="text-sm">{e.message}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{e.source} &middot; {timeAgo(e.created_at)}</p>
+                  <p className="text-xs text-brown mt-1">
+                    from <span className="text-brown-dark font-mono">{sourceLabels[e.source] || e.source}</span> · {timeAgo(e.created_at)}
+                  </p>
                 </div>
               </div>
             ))
@@ -110,8 +128,11 @@ export function IncidentDetail() {
       {/* Trace Waterfall */}
       {spans.length > 0 && (
         <section>
-          <h2 className="font-semibold text-gray-300 mb-3">Trace Waterfall</h2>
-          <div className="bg-gray-900 rounded-lg border border-gray-800 p-4 overflow-x-auto">
+          <div className="mb-3">
+            <h2 className="section-title">Request Timeline</h2>
+            <p className="text-xs text-brown mt-0.5">Visual breakdown of how the request flowed through your system</p>
+          </div>
+          <div className="card p-4 overflow-x-auto">
             <TraceWaterfall spans={spans} />
           </div>
         </section>
