@@ -44,7 +44,7 @@ export async function mcpCommand(options: McpOptions = {}) {
   const server = new Server(
     {
       name: 'scanwarp',
-      version: '0.3.0',
+      version: '0.3.3',
     },
     {
       capabilities: {
@@ -448,5 +448,49 @@ export async function mcpCommand(options: McpOptions = {}) {
   console.error(`Connected to: ${serverUrl}`);
   if (projectId) {
     console.error(`Default project: ${projectId}`);
+
+    // Poll for new incidents and send notifications
+    startIncidentPolling(server, api, projectId);
   }
+}
+
+// Poll for new incidents and log alerts
+function startIncidentPolling(_server: Server, api: ScanWarpAPI, projectId: string) {
+  const seenIncidents = new Set<string>();
+
+  const poll = async () => {
+    try {
+      const incidents = await api.getIncidents({
+        projectId,
+        status: 'open'
+      });
+
+      for (const incident of incidents) {
+        // New incident detected
+        if (!seenIncidents.has(incident.id)) {
+          seenIncidents.add(incident.id);
+
+          // Log alert to stderr (visible in Claude Code output)
+          const message = incident.diagnosis_text
+            ? `🚨 New incident: ${incident.diagnosis_text.slice(0, 100)}...`
+            : `🚨 New ${incident.severity} incident detected with ${incident.events?.length || 0} event(s)`;
+
+          console.error(`\n[ALERT] ${message}`);
+          console.error(`[ALERT] Incident ID: ${incident.id}`);
+          console.error(`[ALERT] Severity: ${incident.severity}`);
+          if (incident.diagnosis_text) {
+            console.error(`[ALERT] Diagnosis: ${incident.diagnosis_text}\n`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[Polling] Error checking incidents:', error instanceof Error ? error.message : error);
+    }
+  };
+
+  // Poll every 30 seconds
+  setInterval(poll, 30000);
+
+  // Initial poll
+  poll();
 }
