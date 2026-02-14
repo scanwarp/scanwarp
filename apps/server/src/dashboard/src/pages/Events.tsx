@@ -55,8 +55,8 @@ export function Events() {
     <div className="space-y-5">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-white">Activity Feed</h1>
-        <p className="text-sm text-gray-500 mt-1">Everything happening across your app — errors, slowdowns, status changes, and more.</p>
+        <h1 className="pixel-heading text-brown-darker" style={{ fontSize: 'clamp(0.8rem, 2vw, 1.1rem)' }}>Activity Feed</h1>
+        <p className="text-sm text-brown mt-1">Everything happening across your app — errors, slowdowns, status changes, and more.</p>
       </div>
 
       {/* Filters */}
@@ -79,31 +79,31 @@ export function Events() {
             <option key={s.value} value={s.value}>{s.label}</option>
           ))}
         </select>
-        <span className="text-xs text-gray-600 ml-auto flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-scan-pulse" />
+        <span className="text-xs text-brown ml-auto flex items-center gap-1.5">
+          <span className="w-2 h-2 bg-accent-green animate-blink" />
           Live — updates every 10s
         </span>
       </div>
 
       {loading && events.length === 0 ? (
-        <p className="text-gray-500 text-sm">Loading activity...</p>
+        <p className="text-brown text-sm">Loading activity...</p>
       ) : events.length === 0 ? (
         <div className="card p-8 text-center">
-          <p className="text-gray-400">No activity found</p>
-          <p className="text-xs text-gray-600 mt-1">Try changing your filters or check back later.</p>
+          <p className="text-brown-dark">No activity found</p>
+          <p className="text-xs text-brown mt-1">Try changing your filters or check back later.</p>
         </div>
       ) : (
-        <div className="card divide-y divide-[#1e2333]">
+        <div className="card divide-y divide-sand-dark">
           {events.map((e) => (
-            <div key={e.id} className="p-4 flex items-start gap-3 hover:bg-surface-overlay/50 transition-colors">
+            <div key={e.id} className="p-4 flex items-start gap-3 hover:bg-sand-dark/30 transition-colors">
               <div className="flex flex-col gap-1 shrink-0 pt-0.5">
                 <Badge label={e.type} />
                 <Badge label={e.severity} />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm text-gray-200">{e.message}</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  from <span className="text-gray-400">{sourceLabels[e.source] || e.source}</span> · {timeAgo(e.created_at)}
+                <p className="text-sm">{e.message}</p>
+                <p className="text-xs text-brown mt-1">
+                  from <span className="text-brown-dark font-mono">{sourceLabels[e.source] || e.source}</span> · {timeAgo(e.created_at)}
                 </p>
               </div>
             </div>

@@ -37,8 +37,8 @@ export function Traces() {
     <div className="space-y-5">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-white">Request Traces</h1>
-        <p className="text-sm text-gray-500 mt-1">
+        <h1 className="pixel-heading text-brown-darker" style={{ fontSize: 'clamp(0.8rem, 2vw, 1.1rem)' }}>Request Traces</h1>
+        <p className="text-sm text-brown mt-1">
           Each trace shows the full journey of a request through your app — what it called, how long each step took, and where things went wrong.
         </p>
       </div>
@@ -69,34 +69,34 @@ export function Traces() {
 
       {!activeProjectId ? (
         <div className="card p-8 text-center">
-          <p className="text-gray-400">No projects found</p>
-          <p className="text-xs text-gray-600 mt-1">Set up tracing in your app to see request data here.</p>
+          <p className="text-brown-dark">No projects found</p>
+          <p className="text-xs text-brown mt-1">Set up tracing in your app to see request data here.</p>
         </div>
       ) : loading && traces.length === 0 ? (
-        <p className="text-gray-500 text-sm">Loading traces...</p>
+        <p className="text-brown text-sm">Loading traces...</p>
       ) : traces.length === 0 ? (
         <div className="card p-8 text-center">
-          <p className="text-gray-400">No traces found</p>
-          <p className="text-xs text-gray-600 mt-1">Try changing your filters or wait for new requests to come in.</p>
+          <p className="text-brown-dark">No traces found</p>
+          <p className="text-xs text-brown mt-1">Try changing your filters or wait for new requests to come in.</p>
         </div>
       ) : (
-        <div className="card divide-y divide-[#1e2333]">
+        <div className="card divide-y divide-sand-dark">
           {traces.map((t) => (
             <Link
               key={t.trace_id}
               to={`/traces/${t.trace_id}`}
-              className="p-4 flex items-center gap-3 hover:bg-surface-overlay/50 transition-colors block"
+              className="p-4 flex items-center gap-3 hover:bg-sand-dark/30 transition-colors block"
             >
               <Badge label={t.has_errors ? 'error' : 'ok'} />
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-mono truncate text-gray-200">
+                <p className="text-sm font-mono truncate">
                   {t.root_span.operation_name}
                 </p>
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-brown mt-1">
                   {t.root_span.service_name} · {t.span_count} step{t.span_count > 1 ? 's' : ''} · took {friendlyDuration(t.max_duration_ms)}
                 </p>
               </div>
-              <span className="text-xs text-gray-500 shrink-0">
+              <span className="text-xs text-brown shrink-0 font-mono">
                 {timeAgo(new Date(t.root_span.start_time).toISOString())}
               </span>
             </Link>

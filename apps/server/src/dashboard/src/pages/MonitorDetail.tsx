@@ -18,35 +18,35 @@ export function MonitorDetail() {
   const m = monitor.data?.monitor;
   const eventList = events.data?.events ?? [];
 
-  if (monitor.loading) return <p className="text-gray-500 text-sm">Loading health check details...</p>;
-  if (!m) return <p className="text-gray-500 text-sm">Health check not found</p>;
+  if (monitor.loading) return <p className="text-brown text-sm">Loading health check details...</p>;
+  if (!m) return <p className="text-brown text-sm">Health check not found</p>;
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div>
         <Link to="/monitors" className="link-brand text-xs">&larr; Back to Health Checks</Link>
-        <h1 className="text-2xl font-bold mt-3 break-all text-white">{m.url}</h1>
-        <p className="text-sm text-gray-500 mt-1">ScanWarp checks this URL {friendlyInterval(m.check_interval_seconds)} to make sure it's responding.</p>
+        <h1 className="pixel-heading text-brown-darker mt-3 break-all" style={{ fontSize: 'clamp(0.7rem, 1.5vw, 0.9rem)' }}>{m.url}</h1>
+        <p className="text-sm text-brown mt-1">ScanWarp checks this URL {friendlyInterval(m.check_interval_seconds)} to make sure it's responding.</p>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="stat-card">
-          <p className="text-xs text-gray-500 font-medium">Current Status</p>
+          <p className="text-xs text-brown font-medium">Current Status</p>
           <div className="mt-2"><Badge label={m.status} /></div>
         </div>
         <div className="stat-card">
-          <p className="text-xs text-gray-500 font-medium">Check Frequency</p>
-          <p className="text-lg font-bold mt-1 text-gray-200">{friendlyInterval(m.check_interval_seconds)}</p>
+          <p className="text-xs text-brown font-medium">Check Frequency</p>
+          <p className="text-lg font-bold mt-1 text-brown-darker">{friendlyInterval(m.check_interval_seconds)}</p>
         </div>
         <div className="stat-card">
-          <p className="text-xs text-gray-500 font-medium">Last Checked</p>
-          <p className="text-sm mt-1.5 text-gray-300">{m.last_checked_at ? timeAgo(m.last_checked_at) : 'not checked yet'}</p>
+          <p className="text-xs text-brown font-medium">Last Checked</p>
+          <p className="text-sm mt-1.5 text-brown-dark">{m.last_checked_at ? timeAgo(m.last_checked_at) : 'not checked yet'}</p>
         </div>
         <div className="stat-card">
-          <p className="text-xs text-gray-500 font-medium">Total Events</p>
-          <p className="text-lg font-bold mt-1 text-gray-200">{eventList.length}</p>
+          <p className="text-xs text-brown font-medium">Total Events</p>
+          <p className="text-lg font-bold mt-1 text-accent-orange">{eventList.length}</p>
         </div>
       </div>
 
@@ -55,7 +55,7 @@ export function MonitorDetail() {
         <section>
           <div className="mb-3">
             <h2 className="section-title">Response Speed</h2>
-            <p className="text-xs text-gray-500 mt-0.5">How fast this service is responding — taller bars mean slower responses</p>
+            <p className="text-xs text-brown mt-0.5">How fast this service is responding — taller bars mean slower responses</p>
           </div>
           <div className="card p-5">
             <ResponseBars events={eventList} />
@@ -67,18 +67,18 @@ export function MonitorDetail() {
       <section>
         <div className="mb-3">
           <h2 className="section-title">Recent Activity</h2>
-          <p className="text-xs text-gray-500 mt-0.5">What's been happening with this service</p>
+          <p className="text-xs text-brown mt-0.5">What's been happening with this service</p>
         </div>
-        <div className="card divide-y divide-[#1e2333]">
+        <div className="card divide-y divide-sand-dark">
           {eventList.length === 0 ? (
-            <p className="p-5 text-gray-500 text-sm text-center">No activity yet — check back after the first health check runs.</p>
+            <p className="p-5 text-brown text-sm text-center">No activity yet — check back after the first health check runs.</p>
           ) : (
             eventList.slice(0, 20).map((e) => (
-              <div key={e.id} className="p-4 flex items-start gap-3 hover:bg-surface-overlay/50 transition-colors">
+              <div key={e.id} className="p-4 flex items-start gap-3 hover:bg-sand-dark/30 transition-colors">
                 <Badge label={e.type} />
                 <div className="min-w-0">
-                  <p className="text-sm text-gray-200 truncate">{e.message}</p>
-                  <p className="text-xs text-gray-500 mt-1">{timeAgo(e.created_at)}</p>
+                  <p className="text-sm truncate">{e.message}</p>
+                  <p className="text-xs text-brown mt-1">{timeAgo(e.created_at)}</p>
                 </div>
               </div>
             ))
@@ -99,7 +99,7 @@ function ResponseBars({ events }: { events: Array<{ raw_data: Record<string, unk
     .slice(0, 30)
     .reverse();
 
-  if (points.length === 0) return <p className="text-gray-500 text-sm">No response time data available yet</p>;
+  if (points.length === 0) return <p className="text-brown text-sm">No response time data available yet</p>;
 
   const maxMs = Math.max(...points.map((p) => p.ms), 1);
 
@@ -108,7 +108,7 @@ function ResponseBars({ events }: { events: Array<{ raw_data: Record<string, unk
       {points.map((p, i) => (
         <div
           key={i}
-          className="flex-1 bg-brand-500/50 rounded-t hover:bg-brand-400/60 transition-colors cursor-default"
+          className="flex-1 bg-accent-orange/50 hover:bg-accent-glow/60 transition-colors cursor-default"
           style={{ height: `${(p.ms / maxMs) * 100}%` }}
           title={`${p.ms}ms at ${new Date(p.time).toLocaleTimeString()}`}
         />

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import type { Span } from '../api';
 import { Badge } from './Badge';
 
@@ -10,23 +10,23 @@ interface SpanNode {
   depth: number;
 }
 
-// ─── Color logic ───
+// ─── Color logic (retro palette) ───
 
 function spanColor(span: Span): string {
-  if (span.status_code === 'ERROR') return 'bg-red-500/80';
+  if (span.status_code === 'ERROR') return 'bg-accent-red/80';
 
   const attrs = span.attributes;
   const isDb = !!(attrs['db.system'] || attrs['db.statement']);
   const isHttp = span.kind === 'CLIENT' && !!(attrs['http.url'] || attrs['http.method'] || attrs['url.full']);
 
   // Slow thresholds
-  if (isDb && span.duration_ms > 500) return 'bg-orange-500/80';
-  if (isHttp && span.duration_ms > 2000) return 'bg-orange-500/80';
+  if (isDb && span.duration_ms > 500) return 'bg-accent-glow/80';
+  if (isHttp && span.duration_ms > 2000) return 'bg-accent-glow/80';
 
-  if (isDb) return 'bg-purple-500/70';
-  if (isHttp) return 'bg-blue-500/70';
+  if (isDb) return 'bg-purple-600/70';
+  if (isHttp) return 'bg-accent-blue/70';
 
-  return 'bg-emerald-500/60';
+  return 'bg-accent-green/60';
 }
 
 function spanColorLabel(span: Span): string {
@@ -135,15 +135,15 @@ function SummaryHeader({ spans }: { spans: Span[] }) {
   const operation = root.operation_name;
 
   return (
-    <div className="flex items-center gap-2 px-1 pb-3 mb-3 border-b border-gray-800 text-sm flex-wrap">
-      <span className="font-mono font-semibold text-gray-200">
+    <div className="flex items-center gap-2 px-1 pb-3 mb-3 border-b border-sand-dark text-sm flex-wrap">
+      <span className="font-mono font-semibold text-brown-darker">
         {method && method !== root.kind ? `${method} ` : ''}{operation}
       </span>
-      <span className="text-gray-600">&middot;</span>
-      <span className="text-gray-400">{totalDuration}ms</span>
-      <span className="text-gray-600">&middot;</span>
-      <span className="text-gray-400">{spans.length} span{spans.length !== 1 ? 's' : ''}</span>
-      <span className="text-gray-600">&middot;</span>
+      <span className="text-brown">&middot;</span>
+      <span className="text-brown-dark">{totalDuration}ms</span>
+      <span className="text-brown">&middot;</span>
+      <span className="text-brown-dark">{spans.length} span{spans.length !== 1 ? 's' : ''}</span>
+      <span className="text-brown">&middot;</span>
       <Badge label={hasErrors ? 'error' : 'ok'} />
     </div>
   );
@@ -155,38 +155,38 @@ function SpanDetails({ span, onClose }: { span: Span; onClose: () => void }) {
   const attrs = getInterestingAttrs(span);
 
   return (
-    <div className="mt-1 mb-2 ml-4 bg-gray-950 border border-gray-700 rounded-lg p-3 text-xs animate-in">
+    <div className="mt-1 mb-2 ml-4 bg-charcoal border-[2px] border-brown-dark p-3 text-xs text-sand">
       <div className="flex items-center justify-between mb-2">
-        <span className="font-semibold text-gray-200">{span.service_name}: {span.operation_name}</span>
-        <button onClick={onClose} className="text-gray-500 hover:text-gray-300 px-1">&times;</button>
+        <span className="font-semibold text-cream">{span.service_name}: {span.operation_name}</span>
+        <button onClick={onClose} className="text-brown hover:text-sand px-1">&times;</button>
       </div>
-      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-gray-400">
-        <span className="text-gray-500">span_id</span>
+      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sand-dark">
+        <span className="text-brown">span_id</span>
         <span className="font-mono">{span.span_id}</span>
-        <span className="text-gray-500">kind</span>
+        <span className="text-brown">kind</span>
         <span>{span.kind}</span>
-        <span className="text-gray-500">status</span>
+        <span className="text-brown">status</span>
         <span>
           <Badge label={span.status_code === 'ERROR' ? 'error' : span.status_code?.toLowerCase() || 'unset'} />
-          {span.status_message && <span className="ml-2 text-red-400">{span.status_message}</span>}
+          {span.status_message && <span className="ml-2 text-accent-red">{span.status_message}</span>}
         </span>
-        <span className="text-gray-500">duration</span>
+        <span className="text-brown">duration</span>
         <span>{span.duration_ms}ms</span>
         {attrs.map(([key, val]) => (
           <Fragment key={key}>
-            <span className="text-gray-500 truncate" title={key}>{key}</span>
+            <span className="text-brown truncate" title={key}>{key}</span>
             <span className="font-mono break-all max-h-20 overflow-y-auto">{val}</span>
           </Fragment>
         ))}
         {span.events.length > 0 && (
           <>
-            <span className="text-gray-500 pt-1 border-t border-gray-800">events</span>
-            <div className="pt-1 border-t border-gray-800 space-y-1">
+            <span className="text-brown pt-1 border-t border-brown-dark">events</span>
+            <div className="pt-1 border-t border-brown-dark space-y-1">
               {span.events.map((ev, i) => (
                 <div key={i}>
-                  <span className="text-yellow-400">{ev.name}</span>
+                  <span className="text-accent-glow">{ev.name}</span>
                   {ev.attributes && Object.keys(ev.attributes).length > 0 && (
-                    <span className="text-gray-500 ml-1">
+                    <span className="text-brown ml-1">
                       {Object.entries(ev.attributes).map(([k, v]) => `${k}=${v}`).join(', ')}
                     </span>
                   )}
@@ -200,15 +200,12 @@ function SpanDetails({ span, onClose }: { span: Span; onClose: () => void }) {
   );
 }
 
-// Need to import Fragment
-import { Fragment } from 'react';
-
 // ─── Main component ───
 
 export function TraceWaterfall({ spans }: { spans: Span[] }) {
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
 
-  if (spans.length === 0) return <p className="text-gray-500 text-sm">No spans</p>;
+  if (spans.length === 0) return <p className="text-brown text-sm">No spans</p>;
 
   const tree = buildTree(spans);
   const flat = flatten(tree);
@@ -228,7 +225,7 @@ export function TraceWaterfall({ spans }: { spans: Span[] }) {
       <SummaryHeader spans={spans} />
 
       {/* Time axis */}
-      <div className="flex items-center gap-2 mb-1 text-[10px] text-gray-600">
+      <div className="flex items-center gap-2 mb-1 text-[10px] text-brown">
         <div style={{ width: 220 }} className="shrink-0" />
         <div className="flex-1 relative h-4">
           {ticks.map((t) => (
@@ -256,29 +253,29 @@ export function TraceWaterfall({ spans }: { spans: Span[] }) {
           return (
             <div key={span.span_id}>
               <div
-                className={`flex items-center gap-2 h-7 cursor-pointer rounded transition-colors ${
-                  isSelected ? 'bg-gray-800/80' : 'hover:bg-gray-800/40'
+                className={`flex items-center gap-2 h-7 cursor-pointer transition-colors ${
+                  isSelected ? 'bg-sand-dark/60' : 'hover:bg-sand-dark/30'
                 }`}
                 onClick={() => setSelectedSpanId(isSelected ? null : span.span_id)}
                 title={`${span.service_name}: ${span.operation_name} — ${span.duration_ms}ms (${label})`}
               >
                 {/* Label column */}
                 <div
-                  className="shrink-0 text-gray-400 truncate flex items-center gap-1"
+                  className="shrink-0 text-brown-dark truncate flex items-center gap-1"
                   style={{ width: 220, paddingLeft: depth * 16 }}
                 >
                   {/* Tree connector */}
                   {depth > 0 && (
-                    <span className="text-gray-700 select-none">└</span>
+                    <span className="text-sand-dark select-none">└</span>
                   )}
-                  <span className="text-gray-500 text-[10px]">{span.service_name}</span>
+                  <span className="text-brown text-[10px]">{span.service_name}</span>
                   <span className="truncate">{span.operation_name}</span>
                 </div>
 
                 {/* Bar column */}
-                <div className="flex-1 relative h-5 bg-gray-800/30 rounded overflow-hidden">
+                <div className="flex-1 relative h-5 bg-sand-dark/30 overflow-hidden">
                   <div
-                    className={`absolute top-0.5 bottom-0.5 rounded ${color} transition-all`}
+                    className={`absolute top-0.5 bottom-0.5 ${color} transition-all`}
                     style={{
                       left: `${left}%`,
                       width: `${width}%`,
@@ -288,7 +285,7 @@ export function TraceWaterfall({ spans }: { spans: Span[] }) {
                 </div>
 
                 {/* Duration column */}
-                <span className="shrink-0 w-16 text-right text-gray-500 tabular-nums">
+                <span className="shrink-0 w-16 text-right text-brown tabular-nums">
                   {span.duration_ms < 1 ? '<1' : span.duration_ms}ms
                 </span>
               </div>
@@ -306,12 +303,12 @@ export function TraceWaterfall({ spans }: { spans: Span[] }) {
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-800 text-[10px] text-gray-500">
-        <LegendDot color="bg-emerald-500/60" label="Success" />
-        <LegendDot color="bg-red-500/80" label="Error" />
-        <LegendDot color="bg-orange-500/80" label="Slow" />
-        <LegendDot color="bg-blue-500/70" label="HTTP Client" />
-        <LegendDot color="bg-purple-500/70" label="Database" />
+      <div className="flex items-center gap-4 mt-3 pt-3 border-t border-sand-dark text-[10px] text-brown">
+        <LegendDot color="bg-accent-green/60" label="Success" />
+        <LegendDot color="bg-accent-red/80" label="Error" />
+        <LegendDot color="bg-accent-glow/80" label="Slow" />
+        <LegendDot color="bg-accent-blue/70" label="HTTP Client" />
+        <LegendDot color="bg-purple-600/70" label="Database" />
       </div>
     </div>
   );
@@ -320,7 +317,7 @@ export function TraceWaterfall({ spans }: { spans: Span[] }) {
 function LegendDot({ color, label }: { color: string; label: string }) {
   return (
     <span className="flex items-center gap-1">
-      <span className={`w-2 h-2 rounded-sm ${color}`} />
+      <span className={`w-2 h-2 ${color}`} />
       {label}
     </span>
   );

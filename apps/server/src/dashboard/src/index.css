@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,7 +6,27 @@
 
 @layer base {
   body {
-    @apply bg-surface text-gray-100 font-sans antialiased;
+    @apply bg-sand-light text-brown-darker font-sans antialiased;
+    line-height: 1.7;
+  }
+
+  /* Scanline overlay */
+  body::after {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 9999;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.015) 2px,
+      rgba(0, 0, 0, 0.015) 4px
+    );
   }
 
   ::-webkit-scrollbar {
@@ -17,19 +37,20 @@
     @apply bg-transparent;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-brand-800/40 rounded-full;
+    background: #D4C4A8;
   }
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-brand-700/60;
+    background: #6d5537;
   }
 }
 
 @layer components {
   .card {
-    @apply bg-surface-raised rounded-xl border border-[#1e2333] transition-all duration-200;
+    @apply bg-cream border-[3px] border-brown-dark transition-all duration-150;
   }
   .card:hover {
-    @apply border-[#2a3048];
+    transform: translate(-2px, -2px);
+    box-shadow: 2px 2px 0 #5C4A32;
   }
 
   .stat-card {
@@ -37,24 +58,35 @@
   }
   .stat-card::before {
     content: '';
-    @apply absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-brand-500/50 to-transparent;
+    @apply absolute top-0 left-0 right-0 h-[3px] bg-accent-orange;
   }
 
   .nav-link {
-    @apply px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2;
+    @apply px-3 py-2 text-sm font-medium transition-all duration-150 flex items-center gap-2 uppercase;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 1px;
   }
   .nav-link-active {
-    @apply bg-brand-500/10 text-brand-400;
+    @apply text-accent-orange bg-cream;
+    border: 2px solid #5C4A32;
   }
   .nav-link-inactive {
-    @apply text-gray-400 hover:text-gray-200 hover:bg-surface-overlay;
+    @apply text-brown;
+    border: 2px solid transparent;
+  }
+  .nav-link-inactive:hover {
+    @apply text-accent-orange;
+    background: #E8DCC8;
   }
 
   .filter-select {
-    @apply bg-surface-overlay border border-[#1e2333] rounded-lg px-3 py-1.5 text-sm text-gray-300
-           focus:outline-none focus:border-brand-500/50 focus:ring-1 focus:ring-brand-500/20
-           transition-all duration-200 appearance-none cursor-pointer;
-    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    @apply bg-cream border-[2px] border-brown-dark px-3 py-1.5 text-brown-dark
+           focus:outline-none focus:border-accent-orange
+           transition-all duration-150 appearance-none cursor-pointer;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.8rem;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%235C4A32' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
     background-position: right 0.5rem center;
     background-repeat: no-repeat;
     background-size: 1.5em 1.5em;
@@ -62,18 +94,63 @@
   }
 
   .section-title {
-    @apply text-sm font-semibold text-gray-300 uppercase tracking-wider;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    @apply text-accent-orange uppercase;
+    letter-spacing: 4px;
   }
 
   .link-brand {
-    @apply text-brand-400 hover:text-brand-300 transition-colors;
+    @apply text-accent-orange transition-colors;
+    font-family: 'Space Mono', monospace;
+  }
+  .link-brand:hover {
+    color: #E8863E;
   }
 
   .btn-primary {
-    @apply px-4 py-2 text-sm font-medium bg-brand-600 hover:bg-brand-500 text-white rounded-lg transition-all duration-200 shadow-lg shadow-brand-600/20;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    @apply bg-accent-orange text-cream px-5 py-3 border-[3px] border-brown-dark uppercase transition-all duration-150 cursor-pointer inline-block;
+    letter-spacing: 1px;
+  }
+  .btn-primary:hover {
+    transform: translate(-3px, -3px);
+    box-shadow: 3px 3px 0 #5C4A32;
+    background: #E8863E;
   }
 
   .btn-success {
-    @apply px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-all duration-200;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    @apply bg-accent-green text-cream px-5 py-3 border-[3px] border-brown-dark uppercase transition-all duration-150 cursor-pointer inline-block;
+    letter-spacing: 1px;
+  }
+  .btn-success:hover {
+    transform: translate(-3px, -3px);
+    box-shadow: 3px 3px 0 #5C4A32;
+    background: #6DBF5A;
+  }
+
+  .terminal {
+    @apply bg-charcoal border-[3px] border-brown-dark p-5 relative;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.85rem;
+    line-height: 2;
+    color: #E8DCC8;
+  }
+  .terminal-label {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.4rem;
+    @apply absolute -top-2.5 left-3 bg-charcoal text-brown px-2 uppercase;
+    letter-spacing: 2px;
+  }
+  .terminal .prompt { color: #E8863E; }
+  .terminal .success { color: #6DBF5A; }
+
+  .pixel-heading {
+    font-family: 'Press Start 2P', monospace;
+    line-height: 1.8;
+    text-shadow: 1px 1px 0 #E8DCC8, -1px -1px 0 rgba(255,255,255,0.5);
   }
 }

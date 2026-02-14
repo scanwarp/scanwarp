@@ -18,35 +18,35 @@ export function Monitors() {
     <div className="space-y-5">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-white">Health Checks</h1>
-        <p className="text-sm text-gray-500 mt-1">
+        <h1 className="pixel-heading text-brown-darker" style={{ fontSize: 'clamp(0.8rem, 2vw, 1.1rem)' }}>Health Checks</h1>
+        <p className="text-sm text-brown mt-1">
           ScanWarp pings these URLs regularly to make sure they're responding. If something goes down, you'll know.
         </p>
       </div>
 
       {loading && monitors.length === 0 ? (
-        <p className="text-gray-500 text-sm">Loading health checks...</p>
+        <p className="text-brown text-sm">Loading health checks...</p>
       ) : monitors.length === 0 ? (
         <div className="card p-8 text-center">
-          <p className="text-gray-400">No health checks set up yet</p>
-          <p className="text-xs text-gray-600 mt-2">
-            Run <code className="text-brand-400 bg-brand-500/10 px-1.5 py-0.5 rounded">scanwarp init</code> to start monitoring your app.
+          <p className="text-brown-dark">No health checks set up yet</p>
+          <p className="text-xs text-brown mt-2">
+            Run <code className="text-accent-orange font-mono bg-accent-orange/10 px-1.5 py-0.5">scanwarp init</code> to start monitoring your app.
           </p>
         </div>
       ) : (
         <div className="card overflow-hidden">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-[#1e2333] text-gray-500 text-xs uppercase tracking-wider">
+              <tr className="border-b-[3px] border-brown-dark text-brown text-xs uppercase tracking-wider font-pixel">
                 <th className="text-left p-4 font-medium">Status</th>
                 <th className="text-left p-4 font-medium">URL</th>
                 <th className="text-left p-4 font-medium hidden sm:table-cell">Check Frequency</th>
                 <th className="text-left p-4 font-medium">Last Checked</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#1e2333]">
+            <tbody className="divide-y divide-sand-dark">
               {monitors.map((m) => (
-                <tr key={m.id} className="hover:bg-surface-overlay/50 transition-colors">
+                <tr key={m.id} className="hover:bg-sand-dark/30 transition-colors">
                   <td className="p-4">
                     <Badge label={m.status} />
                   </td>
@@ -55,8 +55,8 @@ export function Monitors() {
                       {m.url}
                     </Link>
                   </td>
-                  <td className="p-4 text-gray-400 hidden sm:table-cell">{friendlyInterval(m.check_interval_seconds)}</td>
-                  <td className="p-4 text-gray-500">
+                  <td className="p-4 text-brown-dark hidden sm:table-cell font-mono">{friendlyInterval(m.check_interval_seconds)}</td>
+                  <td className="p-4 text-brown font-mono">
                     {m.last_checked_at ? timeAgo(m.last_checked_at) : 'not checked yet'}
                   </td>
                 </tr>

@@ -1,21 +1,21 @@
-/* ── Style definitions ── */
+/* ── Style definitions (retro landing page palette) ── */
 const badgeStyles: Record<string, string> = {
-  critical: 'bg-red-500/15 text-red-400 border-red-500/25',
-  high: 'bg-orange-500/15 text-orange-400 border-orange-500/25',
-  medium: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/25',
-  low: 'bg-brand-500/15 text-brand-400 border-brand-500/25',
-  info: 'bg-brand-500/15 text-brand-400 border-brand-500/25',
-  warning: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/25',
-  error: 'bg-red-500/15 text-red-400 border-red-500/25',
-  down: 'bg-red-500/15 text-red-400 border-red-500/25',
-  up: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
-  slow: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/25',
-  trace_error: 'bg-red-500/15 text-red-400 border-red-500/25',
-  slow_query: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/25',
-  open: 'bg-red-500/15 text-red-400 border-red-500/25',
-  resolved: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
-  ok: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
-  unknown: 'bg-gray-500/15 text-gray-400 border-gray-500/25',
+  critical: 'bg-[#ba4135]/15 text-[#ba4135] border-[#ba4135]',
+  high: 'bg-[#a44200]/15 text-[#a44200] border-[#a44200]',
+  medium: 'bg-[#E8863E]/15 text-[#a44200] border-[#E8863E]',
+  low: 'bg-[#4A7FB5]/15 text-[#4A7FB5] border-[#4A7FB5]',
+  info: 'bg-[#4A7FB5]/15 text-[#4A7FB5] border-[#4A7FB5]',
+  warning: 'bg-[#E8863E]/15 text-[#a44200] border-[#E8863E]',
+  error: 'bg-[#ba4135]/15 text-[#ba4135] border-[#ba4135]',
+  down: 'bg-[#ba4135]/15 text-[#ba4135] border-[#ba4135]',
+  up: 'bg-[#2c701d]/15 text-[#2c701d] border-[#2c701d]',
+  slow: 'bg-[#E8863E]/15 text-[#a44200] border-[#E8863E]',
+  trace_error: 'bg-[#ba4135]/15 text-[#ba4135] border-[#ba4135]',
+  slow_query: 'bg-[#E8863E]/15 text-[#a44200] border-[#E8863E]',
+  open: 'bg-[#ba4135]/15 text-[#ba4135] border-[#ba4135]',
+  resolved: 'bg-[#2c701d]/15 text-[#2c701d] border-[#2c701d]',
+  ok: 'bg-[#2c701d]/15 text-[#2c701d] border-[#2c701d]',
+  unknown: 'bg-[#D4C4A8]/50 text-[#6d5537] border-[#D4C4A8]',
 };
 
 /* ── Human-readable display names ── */
@@ -65,7 +65,7 @@ export function Badge({ label }: { label: string }) {
 
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-medium rounded-md border ${cls}`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-mono font-bold border-2 ${cls}`}
       title={tooltip}
     >
       {displayName}
