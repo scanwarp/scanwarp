@@ -1,3 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-surface text-gray-100 font-sans antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-brand-800/40 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-brand-700/60;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-surface-raised rounded-xl border border-[#1e2333] transition-all duration-200;
+  }
+  .card:hover {
+    @apply border-[#2a3048];
+  }
+
+  .stat-card {
+    @apply card p-5 relative overflow-hidden;
+  }
+  .stat-card::before {
+    content: '';
+    @apply absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-brand-500/50 to-transparent;
+  }
+
+  .nav-link {
+    @apply px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2;
+  }
+  .nav-link-active {
+    @apply bg-brand-500/10 text-brand-400;
+  }
+  .nav-link-inactive {
+    @apply text-gray-400 hover:text-gray-200 hover:bg-surface-overlay;
+  }
+
+  .filter-select {
+    @apply bg-surface-overlay border border-[#1e2333] rounded-lg px-3 py-1.5 text-sm text-gray-300
+           focus:outline-none focus:border-brand-500/50 focus:ring-1 focus:ring-brand-500/20
+           transition-all duration-200 appearance-none cursor-pointer;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1.5em 1.5em;
+    padding-right: 2rem;
+  }
+
+  .section-title {
+    @apply text-sm font-semibold text-gray-300 uppercase tracking-wider;
+  }
+
+  .link-brand {
+    @apply text-brand-400 hover:text-brand-300 transition-colors;
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 text-sm font-medium bg-brand-600 hover:bg-brand-500 text-white rounded-lg transition-all duration-200 shadow-lg shadow-brand-600/20;
+  }
+
+  .btn-success {
+    @apply px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-all duration-200;
+  }
+}

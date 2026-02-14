@@ -4,18 +4,22 @@ import { api } from '../api';
 import { Badge } from '../components/Badge';
 import { usePolling, timeAgo } from '../hooks';
 
+function friendlyDuration(ms: number): string {
+  if (ms < 1) return '<1ms';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 export function Traces() {
   const [statusFilter, setStatusFilter] = useState('');
   const [projectId, setProjectId] = useState('');
 
-  // We need a project_id for traces — try fetching projects to let user pick
   const projects = usePolling(
     () => fetch('/projects').then((r) => r.json()) as Promise<Array<{ id: string; name: string }>>,
     60000,
   );
   const projectList = Array.isArray(projects.data) ? projects.data : [];
 
-  // Auto-select first project if none selected
   const activeProjectId = projectId || projectList[0]?.id || '';
 
   const params: Record<string, string> = { limit: '30' };
@@ -30,14 +34,22 @@ export function Traces() {
   const traces = data?.traces ?? [];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-white">Request Traces</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          Each trace shows the full journey of a request through your app — what it called, how long each step took, and where things went wrong.
+        </p>
+      </div>
+
+      {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-bold">Traces</h1>
         {projectList.length > 1 && (
           <select
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
-            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300"
+            className="filter-select"
           >
             {projectList.map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
@@ -47,35 +59,41 @@ export function Traces() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300"
+          className="filter-select"
         >
-          <option value="">All</option>
-          <option value="error">Errors only</option>
-          <option value="ok">OK only</option>
+          <option value="">All requests</option>
+          <option value="error">Failed requests only</option>
+          <option value="ok">Successful only</option>
         </select>
       </div>
 
       {!activeProjectId ? (
-        <p className="text-gray-500 text-sm">No projects found. Send some traces first.</p>
+        <div className="card p-8 text-center">
+          <p className="text-gray-400">No projects found</p>
+          <p className="text-xs text-gray-600 mt-1">Set up tracing in your app to see request data here.</p>
+        </div>
       ) : loading && traces.length === 0 ? (
-        <p className="text-gray-500 text-sm">Loading...</p>
+        <p className="text-gray-500 text-sm">Loading traces...</p>
       ) : traces.length === 0 ? (
-        <p className="text-gray-500 text-sm">No traces found</p>
+        <div className="card p-8 text-center">
+          <p className="text-gray-400">No traces found</p>
+          <p className="text-xs text-gray-600 mt-1">Try changing your filters or wait for new requests to come in.</p>
+        </div>
       ) : (
-        <div className="bg-gray-900 rounded-lg border border-gray-800 divide-y divide-gray-800">
+        <div className="card divide-y divide-[#1e2333]">
           {traces.map((t) => (
             <Link
               key={t.trace_id}
               to={`/traces/${t.trace_id}`}
-              className="p-3 flex items-center gap-3 hover:bg-gray-800/50 transition-colors block"
+              className="p-4 flex items-center gap-3 hover:bg-surface-overlay/50 transition-colors block"
             >
               <Badge label={t.has_errors ? 'error' : 'ok'} />
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-mono truncate">
+                <p className="text-sm font-mono truncate text-gray-200">
                   {t.root_span.operation_name}
                 </p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {t.root_span.service_name} &middot; {t.span_count} span(s) &middot; {t.max_duration_ms}ms
+                <p className="text-xs text-gray-500 mt-1">
+                  {t.root_span.service_name} · {t.span_count} step{t.span_count > 1 ? 's' : ''} · took {friendlyDuration(t.max_duration_ms)}
                 </p>
               </div>
               <span className="text-xs text-gray-500 shrink-0">
