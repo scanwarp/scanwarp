@@ -9,6 +9,7 @@ import { setupSupabase } from '../integrations/supabase.js';
 import { setupMCP } from '../integrations/mcp.js';
 import { setupNotifications } from '../integrations/notifications.js';
 import { setupInstrumentation } from '../integrations/instrument.js';
+import { setupBrowserMonitoring } from '../integrations/browser.js';
 import { config } from '../config.js';
 
 interface InitOptions {
@@ -160,17 +161,21 @@ export async function initCommand(options: InitOptions = {}) {
     await setupInstrumentation(detected, serverUrl, projectId, false); // false = don't prompt, install by default
   }
 
-  // Step 7: MCP Configuration
+  // Step 7: Browser Error Monitoring
+  console.log(chalk.bold('\n🌐 Browser Error Monitoring\n'));
+  await setupBrowserMonitoring(detected, serverUrl, projectId);
+
+  // Step 8: MCP Configuration
   if (!options.skipMcp) {
     console.log(chalk.bold('\n🤖 MCP Configuration\n'));
     await setupMCP(serverUrl);
   }
 
-  // Step 8: Notifications
+  // Step 9: Notifications
   console.log(chalk.bold('\n🔔 Notifications\n'));
   await setupNotifications();
 
-  // Step 9: Summary
+  // Step 10: Summary
   printSummary(api, productionUrl, detected);
 }
 

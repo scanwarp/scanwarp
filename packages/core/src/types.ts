@@ -8,7 +8,7 @@ export interface Monitor {
   created_at: Date;
 }
 
-export type EventSource = 'monitor' | 'vercel' | 'stripe' | 'supabase' | 'github' | 'provider-status' | 'otel';
+export type EventSource = 'monitor' | 'vercel' | 'stripe' | 'supabase' | 'github' | 'provider-status' | 'otel' | 'browser';
 
 export interface Event {
   id: string;

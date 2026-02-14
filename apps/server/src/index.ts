@@ -44,6 +44,21 @@ if (fs.existsSync(dashboardDir) && fs.existsSync(path.join(dashboardDir, 'index.
   console.log('Dashboard enabled — serving from', dashboardDir);
 }
 
+// Serve browser monitoring script
+fastify.get('/browser.js', async (_request, reply) => {
+  // Look for the @scanwarp/browser package in node_modules
+  const browserScriptPath = path.join(__dirname, '..', 'node_modules', '@scanwarp', 'browser', 'dist', 'index.min.js');
+
+  if (fs.existsSync(browserScriptPath)) {
+    reply.type('application/javascript');
+    return fs.readFileSync(browserScriptPath, 'utf-8');
+  }
+
+  // Fallback: return a minimal error handler if package not found
+  reply.type('application/javascript');
+  return `console.warn('[ScanWarp] Browser monitoring script not found. Install @scanwarp/browser package.');`;
+});
+
 // Add raw body support for webhook signature verification
 fastify.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
   try {
@@ -417,6 +432,90 @@ fastify.get('/waitlist', async (request, reply) => {
   } catch (err) {
     request.log.error({ err }, 'Failed to fetch waitlist');
     return reply.code(500).send({ error: 'Failed to fetch waitlist' });
+  }
+});
+
+// Browser error tracking endpoint
+fastify.post<{
+  Headers: { 'x-scanwarp-project-id': string };
+  Body: {
+    errors: Array<{
+      type: string;
+      message: string;
+      stack?: string;
+      timestamp: number;
+      url: string;
+      userAgent: string;
+      filename?: string;
+      lineno?: number;
+      colno?: number;
+      sessionId: string;
+    }>;
+  };
+}>('/api/browser-errors', async (request, reply) => {
+  const projectId = request.headers['x-scanwarp-project-id'];
+
+  if (!projectId) {
+    return reply.code(400).send({ error: 'Missing x-scanwarp-project-id header' });
+  }
+
+  const { errors } = request.body;
+
+  if (!errors || !Array.isArray(errors)) {
+    return reply.code(400).send({ error: 'Missing or invalid errors array' });
+  }
+
+  try {
+    let createdCount = 0;
+
+    for (const error of errors) {
+      // Create event for each browser error
+      const eventRow = await db.createEvent({
+        project_id: projectId,
+        type: 'error',
+        source: 'browser',
+        message: `[${error.type}] ${error.message}`,
+        raw_data: error as unknown as Record<string, unknown>,
+        severity: error.type === 'blank_screen' || error.type === 'unhandled_error' ? 'high' : 'medium',
+      });
+
+      // Run anomaly detection
+      const event = {
+        id: eventRow.id,
+        project_id: eventRow.project_id,
+        monitor_id: eventRow.monitor_id || undefined,
+        type: eventRow.type as 'error',
+        source: eventRow.source as 'browser',
+        message: eventRow.message,
+        raw_data: eventRow.raw_data || undefined,
+        severity: eventRow.severity as 'high' | 'medium',
+        created_at: eventRow.created_at,
+      };
+
+      const anomalyResult = await anomalyDetector.analyzeEvent(event);
+
+      if (anomalyResult.shouldDiagnose) {
+        await anomalyDetector.markForDiagnosis(event.id, anomalyResult.reason || 'Browser error anomaly detected');
+
+        // Create incident with AI diagnosis
+        try {
+          await incidentService.createIncident([event.id]);
+        } catch (err) {
+          request.log.error({ err }, 'Failed to create incident for browser error');
+        }
+      }
+
+      createdCount++;
+    }
+
+    return {
+      success: true,
+      message: `Processed ${errors.length} browser errors`,
+      created: createdCount,
+    };
+  } catch (error) {
+    request.log.error(error);
+    return reply.code(500).send({ success: false, message: 'Failed to process browser errors' });
   }
 });
 

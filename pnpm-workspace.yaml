@@ -2,6 +2,7 @@ packages:
   - packages/cli
   - packages/core
   - packages/instrument
+  - packages/browser
   - apps/*
   - apps/server/src/dashboard
 

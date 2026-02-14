@@ -1,0 +1,40 @@
+{
+  "name": "@scanwarp/browser",
+  "version": "0.1.0",
+  "description": "Browser error monitoring for ScanWarp - capture frontend errors in production",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rollup -c",
+    "dev": "rollup -c --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "monitoring",
+    "browser",
+    "error-tracking",
+    "frontend",
+    "observability"
+  ],
+  "author": "ScanWarp",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scanwarp/scanwarp.git",
+    "directory": "packages/browser"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^12.1.1",
+    "@types/node": "^20.11.0",
+    "rollup": "^4.28.1",
+    "tslib": "^2.8.1",
+    "typescript": "^5.3.3"
+  }
+}
