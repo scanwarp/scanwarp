@@ -1,11 +1,13 @@
 import type { Database } from '../db/index.js';
 import type { Monitor, Event } from '@scanwarp/core';
+import { checkAllPages, type PageCheckResult } from './page-checker.js';
 
 interface CheckResult {
   success: boolean;
   responseTime: number;
   statusCode?: number;
   error?: string;
+  pageResults?: PageCheckResult[];
 }
 
 export class MonitorRunner {
@@ -66,6 +68,7 @@ export class MonitorRunner {
 
     return rows.map((row) => ({
       ...row,
+      pages: row.pages ? JSON.parse(row.pages) : [],
       status: row.status as Monitor['status'],
       last_checked_at: row.last_checked_at ? new Date(row.last_checked_at) : undefined,
       created_at: new Date(row.created_at),
@@ -73,7 +76,7 @@ export class MonitorRunner {
   }
 
   private async checkMonitor(monitor: Monitor) {
-    const result = await this.performCheck(monitor.url);
+    const result = await this.performCheck(monitor);
 
     // Update monitor status and last_checked_at
     const newStatus = result.success ? 'up' : 'down';
@@ -86,13 +89,14 @@ export class MonitorRunner {
     await this.detectAndCreateEvents(monitor, result, newStatus);
   }
 
-  private async performCheck(url: string): Promise<CheckResult> {
+  private async performCheck(monitor: Monitor): Promise<CheckResult> {
     const startTime = Date.now();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
 
     try {
-      const response = await fetch(url, {
+      // Check main URL
+      const response = await fetch(monitor.url, {
         signal: controller.signal,
         method: 'GET',
       });
@@ -100,11 +104,30 @@ export class MonitorRunner {
       clearTimeout(timeout);
       const responseTime = Date.now() - startTime;
 
-      return {
+      const mainCheck: CheckResult = {
         success: response.status >= 200 && response.status < 300,
         responseTime,
         statusCode: response.status,
       };
+
+      // If monitor has pages configured, check them all
+      if (monitor.pages && monitor.pages.length > 0) {
+        try {
+          const pageResults = await checkAllPages(monitor.pages, monitor.url);
+          mainCheck.pageResults = pageResults;
+
+          // If any page has errors or blank screens, mark main check as degraded
+          const hasIssues = pageResults.some(p => p.status === 'error' || p.status === 'blank');
+          if (hasIssues) {
+            mainCheck.success = false;
+          }
+        } catch (error) {
+          console.error('Error checking pages:', error);
+          // Don't fail the whole check if page checking fails
+        }
+      }
+
+      return mainCheck;
     } catch (error) {
       clearTimeout(timeout);
       const responseTime = Date.now() - startTime;
@@ -173,6 +196,32 @@ export class MonitorRunner {
           events.push({
             type: 'slow',
             message: `Monitor ${monitor.url} is slow: ${result.responseTime}ms (avg: ${Math.round(avgTime)}ms)`,
+            severity: 'medium',
+          });
+        }
+      }
+    }
+
+    // Check page-specific issues
+    if (result.pageResults && result.pageResults.length > 0) {
+      for (const pageResult of result.pageResults) {
+        if (pageResult.status === 'blank') {
+          events.push({
+            type: 'down',
+            message: `Blank screen detected on ${pageResult.url}`,
+            severity: 'critical',
+          });
+        } else if (pageResult.status === 'error') {
+          const issue = pageResult.issues[0] || 'Unknown error';
+          events.push({
+            type: 'down',
+            message: `Page error on ${pageResult.url}: ${issue}`,
+            severity: 'high',
+          });
+        } else if (pageResult.status === 'slow') {
+          events.push({
+            type: 'slow',
+            message: `Slow page load on ${pageResult.url}: ${pageResult.responseTime}ms`,
             severity: 'medium',
           });
         }

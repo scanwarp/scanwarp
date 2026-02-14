@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS monitors (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
   url TEXT NOT NULL,
+  pages JSONB DEFAULT '[]',
   check_interval_seconds INTEGER NOT NULL DEFAULT 60,
   last_checked_at TIMESTAMP,
   status VARCHAR(50) DEFAULT 'unknown',

@@ -9,6 +9,7 @@ import { detectProject, type DetectedProject } from '../detector.js';
 import { AnalysisEngine } from '../dev/analysis-engine.js';
 import { SchemaTracker } from '../dev/analyzers/schema-drift.js';
 import { BROWSER_MONITOR_SCRIPT } from '../dev/browser-monitor-script.js';
+import { checkAllPages, formatResultsTable, getResultsSummary, type PageCheckResult } from '../dev/page-checker.js';
 
 interface DevOptions {
   command?: string;
@@ -73,6 +74,8 @@ interface MemoryStore {
   schemaTracker: SchemaTracker;
   /** Timestamp when dev mode started */
   startedAt: number;
+  /** Page health check results */
+  pageHealth: PageCheckResult[];
 }
 
 /** Stored result from checking a single route */
@@ -262,6 +265,36 @@ export async function devCommand(options: DevOptions = {}) {
         }
 
         console.log(chalk.gray('\n─'.repeat(60)));
+
+        // Step 6b: Run page health checks on all discovered pages
+        if (routes.pages.length > 0) {
+          console.log(chalk.bold.cyan('\n  Page Health Check\n'));
+          const pageHealthResults = await checkAllPages(
+            routes.pages,
+            `http://localhost:${devServerPort}`
+          );
+
+          // Store results for MCP access
+          store.pageHealth = pageHealthResults;
+
+          // Display results
+          console.log(formatResultsTable(pageHealthResults));
+
+          const summary = getResultsSummary(pageHealthResults);
+          if (summary.errors > 0 || summary.blanks > 0 || summary.slow > 0) {
+            console.log('');
+            console.log(chalk.yellow(`  ⚠ Found issues:`));
+            if (summary.errors > 0) console.log(chalk.red(`    ${summary.errors} error(s)`));
+            if (summary.blanks > 0) console.log(chalk.yellow(`    ${summary.blanks} blank screen(s)`));
+            if (summary.slow > 0) console.log(chalk.yellow(`    ${summary.slow} slow page(s)`));
+          } else if (summary.ok === summary.total) {
+            console.log('');
+            console.log(chalk.green(`  ✓ All ${summary.total} pages healthy`));
+          }
+
+          console.log(chalk.gray('\n─'.repeat(60)));
+        }
+
         console.log('');
       }
     }).catch(() => {
@@ -270,7 +303,7 @@ export async function devCommand(options: DevOptions = {}) {
   }
 
   // Step 7: Start file watcher
-  watcher = startFileWatcher(cwd, routes, routeFileMap, previousResults, baselines, store.schemaTracker, devServerPort);
+  watcher = startFileWatcher(cwd, routes, routeFileMap, previousResults, baselines, store.schemaTracker, devServerPort, store);
 
   // Enable live request log
   store.liveLogEnabled = true;
@@ -489,6 +522,7 @@ async function startLocalServer(
     baselines: new Map(),
     schemaTracker: new SchemaTracker(),
     startedAt: Date.now(),
+    pageHealth: [],
   };
 
   const server = createServer((req, res) => {
@@ -628,6 +662,16 @@ async function startLocalServer(
           res.end(JSON.stringify({
             errors: store.browserErrors.slice(-20), // Last 20 errors
             total: store.browserErrors.length
+          }));
+          return;
+        }
+
+        // GET /api/page-health
+        if (req.method === 'GET' && req.url === '/api/page-health') {
+          res.writeHead(200);
+          res.end(JSON.stringify({
+            results: store.pageHealth,
+            summary: getResultsSummary(store.pageHealth)
           }));
           return;
         }
@@ -1262,6 +1306,7 @@ function startFileWatcher(
   baselines: Map<string, number>,
   schemaTracker: SchemaTracker,
   devServerPort: number,
+  store: MemoryStore,
 ): FSWatcher {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingFiles = new Set<string>();
@@ -1306,6 +1351,39 @@ function startFileWatcher(
         // Set baseline on first success (don't overwrite existing baselines)
         if (r.status > 0 && r.status < 400 && !baselines.has(r.route)) {
           baselines.set(r.route, r.timeMs);
+        }
+      }
+
+      // Re-test page health for affected pages
+      const affectedPages = affectedRoutes.filter((route) => routes.pages.includes(route));
+      if (affectedPages.length > 0) {
+        console.log('');
+        console.log(chalk.bold.cyan(`  Re-testing ${affectedPages.length} page${affectedPages.length > 1 ? 's' : ''} for health...\n`));
+
+        const pageHealthResults = await checkAllPages(
+          affectedPages,
+          `http://localhost:${devServerPort}`
+        );
+
+        // Update store with new results (merge with existing results for other pages)
+        const otherPageResults = store.pageHealth.filter(
+          (result) => !affectedPages.some((page) => result.url.endsWith(page))
+        );
+        store.pageHealth = [...otherPageResults, ...pageHealthResults];
+
+        // Display results table
+        console.log(formatResultsTable(pageHealthResults));
+
+        const summary = getResultsSummary(pageHealthResults);
+        if (summary.errors > 0 || summary.blanks > 0 || summary.slow > 0) {
+          console.log('');
+          console.log(chalk.yellow(`  ⚠ Found issues:`));
+          if (summary.errors > 0) console.log(chalk.red(`    ${summary.errors} error(s)`));
+          if (summary.blanks > 0) console.log(chalk.yellow(`    ${summary.blanks} blank screen(s)`));
+          if (summary.slow > 0) console.log(chalk.yellow(`    ${summary.slow} slow page(s)`));
+        } else if (summary.ok === summary.total) {
+          console.log('');
+          console.log(chalk.green(`  ✓ All ${summary.total} pages healthy`));
         }
       }
 

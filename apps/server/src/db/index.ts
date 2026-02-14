@@ -23,6 +23,7 @@ export interface MonitorRow {
   id: string;
   project_id: string;
   url: string;
+  pages: string;
   check_interval_seconds: number;
   last_checked_at: Date | null;
   status: string;
