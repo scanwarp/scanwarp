@@ -179,18 +179,36 @@ function printSummary(api: ScanWarpAPI, url: string, _detected: unknown) {
 
   console.log(chalk.bold('Your monitoring is now active:'));
   console.log(chalk.gray(`  • Monitoring: ${url}`));
-  console.log(chalk.gray(`  • Check interval: Every 60 seconds`));
-  console.log(chalk.gray(`  • Dashboard: ${api.serverUrl}\n`));
+  console.log(chalk.gray(`  • Check interval: Every 60 seconds\n`));
+
+  // Dashboard - make it prominent
+  console.log(chalk.bold.cyan('📊 Dashboard:'));
+  console.log(chalk.white.bold(`  → ${api.serverUrl}\n`));
+  console.log(chalk.gray('  What you\'ll find:'));
+  console.log(chalk.gray('    • Overview - System health at a glance'));
+  console.log(chalk.gray('    • Monitors - Uptime and response times'));
+  console.log(chalk.gray('    • Events - Real-time feed from your app'));
+  console.log(chalk.gray('    • Incidents - Auto-detected issues with AI diagnosis'));
+  console.log(chalk.gray('    • Traces - Request waterfalls with bottleneck highlighting\n'));
+
+  // MCP Integration
+  console.log(chalk.bold.cyan('🤖 Connect Your AI Tool:'));
+  console.log(chalk.gray('  Your AI can now see what\'s broken via MCP:'));
+  console.log(chalk.gray('    • Ask: "What\'s broken in production?"'));
+  console.log(chalk.gray('    • Ask: "Show me the slowest requests"'));
+  console.log(chalk.gray('    • Ask: "Get the fix prompt for the latest incident"\n'));
 
   console.log(chalk.bold('Next steps:'));
-  console.log(chalk.gray('  1. Deploy your app to trigger monitoring'));
-  console.log(chalk.gray('  2. Visit the dashboard to see events and incidents'));
-  console.log(chalk.gray('  3. Check your notifications for any alerts\n'));
+  console.log(chalk.gray('  1. Deploy your app to start monitoring'));
+  console.log(chalk.gray(`  2. Visit ${api.serverUrl} to see your dashboard`));
+  console.log(chalk.gray('  3. Check your notifications for alerts\n'));
 
   console.log(chalk.bold('Useful commands:'));
-  console.log(chalk.gray('  • scanwarp status    - Check monitoring status'));
-  console.log(chalk.gray('  • scanwarp events    - View recent events'));
-  console.log(chalk.gray('  • scanwarp incidents - View open incidents\n'));
+  console.log(chalk.gray('  • scanwarp status  - Check monitoring status'));
+  console.log(chalk.gray('  • scanwarp events  - View recent events'));
+  console.log(chalk.gray('  • scanwarp dev     - Run full monitoring locally\n'));
 
   console.log(chalk.cyan('Happy shipping! 🚀\n'));
+  console.log(chalk.gray(`Learn more: ${chalk.white('https://github.com/scanwarp/scanwarp')}`));
+  console.log(chalk.gray(`Join Discord: ${chalk.white('https://discord.gg/K79UAMudM')}\n`));
 }

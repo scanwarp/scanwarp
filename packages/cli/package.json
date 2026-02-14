@@ -1,13 +1,14 @@
 {
   "name": "scanwarp",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "description": "Production monitoring built for developers who ship fast. Auto-diagnoses issues with Claude AI.",
   "main": "dist/index.js",
   "bin": {
     "scanwarp": "./dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc",
@@ -44,7 +45,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
-    "@scanwarp/core": "workspace:*",
+    "@scanwarp/core": "^0.3.0",
     "axios": "^1.13.5",
     "chalk": "^5.6.2",
     "chokidar": "^5.0.0",

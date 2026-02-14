@@ -200,8 +200,6 @@ export class SqliteDatabase implements DatabaseInterface {
   }
 
   private initSchema() {
-    const meta = this.db.prepare("SELECT value FROM _meta WHERE key = 'schema_version'");
-
     // Check if _meta table exists
     const tableExists = this.db.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='_meta'"
@@ -213,6 +211,7 @@ export class SqliteDatabase implements DatabaseInterface {
       return;
     }
 
+    const meta = this.db.prepare("SELECT value FROM _meta WHERE key = 'schema_version'");
     const row = meta.get() as { value: string } | undefined;
     const currentVersion = row ? parseInt(row.value) : 0;
 
