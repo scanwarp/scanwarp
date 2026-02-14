@@ -1,6 +1,6 @@
 {
   "name": "scanwarp",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "description": "Production monitoring built for developers who ship fast. Auto-diagnoses issues with Claude AI.",
   "main": "dist/index.js",
   "bin": {

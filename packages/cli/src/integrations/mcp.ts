@@ -99,7 +99,9 @@ export async function setupMCP(serverUrl: string) {
 
     console.log(chalk.green(`✓ MCP server added to ${toolName} configuration`));
     console.log(chalk.gray(`  Config: ${configPath}\n`));
-    console.log(chalk.yellow(`  Restart ${toolName} to load the MCP server\n`));
+    console.log(chalk.bold.yellow('  📌 One more step:'));
+    console.log(chalk.yellow(`  Restart ${toolName} to activate the MCP connection`));
+    console.log(chalk.gray(`  (${toolName} loads MCP servers at startup)\n`));
   } catch (error) {
     console.log(chalk.red('✗ Failed to update MCP config'));
     console.log(chalk.gray(`  ${error instanceof Error ? error.message : 'Unknown error'}\n`));

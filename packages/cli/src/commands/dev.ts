@@ -8,6 +8,7 @@ import { watch as chokidarWatch, type FSWatcher } from 'chokidar';
 import { detectProject, type DetectedProject } from '../detector.js';
 import { AnalysisEngine } from '../dev/analysis-engine.js';
 import { SchemaTracker } from '../dev/analyzers/schema-drift.js';
+import { BROWSER_MONITOR_SCRIPT } from '../dev/browser-monitor-script.js';
 
 interface DevOptions {
   command?: string;
@@ -40,9 +41,24 @@ interface StoredEvent {
   created_at: Date;
 }
 
+interface BrowserError {
+  type: string;
+  message: string;
+  stack?: string;
+  timestamp: number;
+  url?: string;
+  userAgent?: string;
+  filename?: string;
+  lineno?: number;
+  colno?: number;
+  html?: string;
+}
+
 interface MemoryStore {
   spans: StoredSpan[];
   events: StoredEvent[];
+  /** Browser errors captured from frontend */
+  browserErrors: BrowserError[];
   /** Set to true once the initial crawl is done and we should print the live request log */
   liveLogEnabled: boolean;
   /** Analysis engine for real-time trace analysis */
@@ -80,6 +96,22 @@ interface RouteFileMap {
 
 // ─── Main dev command ───
 
+// ─── Helper functions ───
+
+function hasInstrumentInPackageJson(cwd: string): boolean {
+  const packageJsonPath = path.join(cwd, 'package.json');
+  if (!fs.existsSync(packageJsonPath)) {
+    return false;
+  }
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+    return !!(packageJson.dependencies?.['@scanwarp/instrument'] ||
+              packageJson.devDependencies?.['@scanwarp/instrument']);
+  } catch {
+    return false;
+  }
+}
+
 // ─── Production setup detection ───
 
 function checkProductionSetup(cwd: string): boolean {
@@ -99,18 +131,7 @@ function checkProductionSetup(cwd: string): boolean {
   const hasInstrumentationFile = fs.existsSync(path.join(cwd, 'instrumentation.ts')) ||
                                   fs.existsSync(path.join(cwd, 'instrumentation.js'));
 
-  // Check if @scanwarp/instrument is in package.json
-  let hasInstrumentPackage = false;
-  const packageJsonPath = path.join(cwd, 'package.json');
-  if (fs.existsSync(packageJsonPath)) {
-    try {
-      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
-      hasInstrumentPackage = !!(packageJson.dependencies?.['@scanwarp/instrument'] ||
-                                 packageJson.devDependencies?.['@scanwarp/instrument']);
-    } catch {
-      // Ignore parse errors
-    }
-  }
+  const hasInstrumentPackage = hasInstrumentInPackageJson(cwd);
 
   return hasInstrumentationFile || hasInstrumentPackage;
 }
@@ -174,14 +195,21 @@ export async function devCommand(options: DevOptions = {}) {
   console.log(chalk.gray(`    }`));
   console.log(chalk.gray(`  }\n`));
 
+  // Print browser monitoring instructions
+  console.log(chalk.bold('  🔍 Browser error monitoring:\n'));
+  console.log(chalk.gray(`  Add this script tag to your HTML <head> for frontend error capture:`));
+  console.log(chalk.cyan(`  <script src="http://localhost:${scanwarpPort}/monitor.js"></script>\n`));
+  console.log(chalk.gray(`  This will detect blank screens, console errors, and React issues.\n`));
+
   // Step 5: Start the user's dev server
   const isNextJs = detected.framework === 'Next.js';
+  const hasInstrumentPackage = hasInstrumentInPackageJson(cwd);
   const devServerPort = detectDevServerPort(devCmd);
 
   console.log(chalk.bold(`  Starting: ${devCmd}\n`));
   console.log(chalk.gray('─'.repeat(60)));
 
-  const child = startDevServer(devCmd, cwd, scanwarpPort, isNextJs);
+  const child = startDevServer(devCmd, cwd, scanwarpPort, isNextJs, hasInstrumentPackage);
 
   // Use store's maps for tracking (shared with MCP API)
   const previousResults = store.previousResults;
@@ -453,6 +481,7 @@ async function startLocalServer(
   const store: MemoryStore = {
     spans: [],
     events: [],
+    browserErrors: [],
     liveLogEnabled: false,
     analysisEngine: new AnalysisEngine(),
     routes: { pages: [], apiRoutes: [] },
@@ -499,6 +528,63 @@ async function startLocalServer(
           return;
         }
 
+        // POST /dev/errors - Browser error reporting
+        if (req.method === 'POST' && req.url === '/dev/errors') {
+          try {
+            const data = JSON.parse(body);
+            const error: BrowserError = {
+              type: data.error?.type || 'unknown',
+              message: data.error?.message || 'No message',
+              stack: data.error?.stack,
+              timestamp: data.error?.timestamp || Date.now(),
+              url: data.url,
+              userAgent: data.userAgent,
+              filename: data.error?.filename,
+              lineno: data.error?.lineno,
+              colno: data.error?.colno,
+              html: data.error?.html,
+            };
+
+            store.browserErrors.push(error);
+
+            // Keep only last 100 errors
+            if (store.browserErrors.length > 100) {
+              store.browserErrors.shift();
+            }
+
+            // Print to console for visibility
+            if (error.type === 'blank_screen') {
+              console.log(chalk.red('\n🚨 [Browser] Blank screen detected!'));
+              console.log(chalk.yellow(`   URL: ${error.url}`));
+            } else {
+              console.log(chalk.red(`\n🚨 [Browser] ${error.type}: ${error.message}`));
+              if (error.filename) {
+                console.log(chalk.gray(`   ${error.filename}:${error.lineno}:${error.colno}`));
+              }
+            }
+
+            res.writeHead(200);
+            res.end(JSON.stringify({ success: true }));
+          } catch (e) {
+            res.writeHead(400);
+            res.end(JSON.stringify({ error: 'Invalid request' }));
+          }
+          return;
+        }
+
+        // GET /monitor.js - Serve browser monitoring script
+        if (req.method === 'GET' && req.url === '/monitor.js') {
+          const monitorScript = BROWSER_MONITOR_SCRIPT.replace(
+            '__SCANWARP_SERVER__',
+            `'http://localhost:${port}'`
+          );
+
+          res.setHeader('Content-Type', 'application/javascript');
+          res.writeHead(200);
+          res.end(monitorScript);
+          return;
+        }
+
         // GET /health
         if (req.method === 'GET' && req.url === '/health') {
           res.writeHead(200);
@@ -533,6 +619,16 @@ async function startLocalServer(
           const issues = store.analysisEngine.getActiveIssues();
           res.writeHead(200);
           res.end(JSON.stringify({ issues }));
+          return;
+        }
+
+        // GET /api/browser-errors
+        if (req.method === 'GET' && req.url === '/api/browser-errors') {
+          res.writeHead(200);
+          res.end(JSON.stringify({
+            errors: store.browserErrors.slice(-20), // Last 20 errors
+            total: store.browserErrors.length
+          }));
           return;
         }
 
@@ -869,6 +965,7 @@ function startDevServer(
   cwd: string,
   scanwarpPort: number,
   isNextJs: boolean,
+  hasInstrumentPackage: boolean,
 ): ChildProcess {
   const [cmd, ...args] = parseCommand(devCmd);
 
@@ -880,8 +977,8 @@ function startDevServer(
     SCANWARP_SERVICE_NAME: 'dev',
   };
 
-  // For non-Next.js, inject NODE_OPTIONS to auto-load instrumentation
-  if (!isNextJs) {
+  // For non-Next.js, inject NODE_OPTIONS to auto-load instrumentation (if installed)
+  if (!isNextJs && hasInstrumentPackage) {
     const existingNodeOpts = process.env.NODE_OPTIONS || '';
     env.NODE_OPTIONS = `--require @scanwarp/instrument ${existingNodeOpts}`.trim();
   }
