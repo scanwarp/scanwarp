@@ -12,8 +12,8 @@ export function useFetch<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  }, deps as any);
 
   useEffect(() => {
     refetch();

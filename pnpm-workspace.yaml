@@ -1,5 +1,7 @@
 packages:
-  - packages/*
+  - packages/cli
+  - packages/core
+  - packages/instrument
   - apps/*
   - apps/server/src/dashboard
 

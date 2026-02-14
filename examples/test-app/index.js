@@ -73,6 +73,7 @@ app.get('/api/checkout', (req, res) => {
 
   // Crash the route by trying to access undefined property
   const discount = null;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const percentage = discount.amount; // Will throw: Cannot read property 'amount' of null
 
   // This code will never be reached
@@ -90,7 +91,8 @@ app.get('/api/health', (req, res) => {
 });
 
 // Error handler
-app.use((err, req, res, next) => {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((err, req, res, _next) => {
   console.error('ERROR:', err.message);
   logEvent('error', `Server error: ${err.message} at ${req.path}`);
   res.status(500).json({

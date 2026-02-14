@@ -162,6 +162,7 @@ export class SlackChannel extends Channel {
     const { incident, correlatedEvents, isProviderIssue, affectedProviders } = payload;
     const emoji = this.getSeverityEmoji(incident.severity);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const blocks: any[] = [];
 
     const providerBadge = isProviderIssue ? ' ☁️ Provider Issue' : '';
