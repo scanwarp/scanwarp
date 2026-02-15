@@ -56,8 +56,11 @@ export class MonitorRunner {
 
     console.log(`Checking ${monitors.length} monitor(s)...`);
 
-    for (const monitor of monitors) {
-      await this.checkMonitor(monitor);
+    // Run checks concurrently in batches of 10
+    const concurrency = 10;
+    for (let i = 0; i < monitors.length; i += concurrency) {
+      const batch = monitors.slice(i, i + concurrency);
+      await Promise.allSettled(batch.map((monitor) => this.checkMonitor(monitor)));
     }
   }
 

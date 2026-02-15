@@ -9,10 +9,25 @@
     "lint": "eslint .",
     "typecheck": "pnpm -r typecheck",
     "clean": "pnpm -r clean",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:e2e": "cd scripts && npm install && npm run e2e"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "monitoring",
+    "observability",
+    "ai",
+    "claude",
+    "mcp",
+    "cursor",
+    "opentelemetry",
+    "tracing",
+    "production",
+    "incidents",
+    "diagnosis",
+    "vibe-coding"
+  ],
+  "author": "ScanWarp",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.11.0",
@@ -20,7 +35,8 @@
     "@typescript-eslint/parser": "^6.19.0",
     "eslint": "^8.56.0",
     "supabase": "^2.76.7",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^4.0.18"
   },
   "engines": {
     "node": ">=18.0.0",

@@ -75,14 +75,12 @@ export class AnomalyDetector {
     return recentErrorCount > baselineErrorRate * 3;
   }
 
-  private extractErrorPattern(message: string): string {
-    // Extract the core error pattern, removing specific IDs, timestamps, etc.
-    // This is a simple version - could be made more sophisticated
+  extractErrorPattern(message: string): string {
     return message
-      .replace(/\d+/g, '') // Remove numbers
-      .replace(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi, '') // Remove UUIDs
-      .replace(/\b\d{4}-\d{2}-\d{2}\b/g, '') // Remove dates
-      .substring(0, 50); // Take first 50 chars as pattern
+      .replace(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi, '<UUID>')
+      .replace(/\b\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}[.\d]*Z?)?\b/g, '<DATE>')
+      .replace(/HTTP (\d{3})|(\d+)/g, (_, httpCode, digits) => httpCode ? `HTTP ${httpCode}` : '<N>')
+      .substring(0, 50);
   }
 
   async markForDiagnosis(eventId: string, reason: string) {
