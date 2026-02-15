@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { NotificationManager } from '../notifications/manager.js';
+import { validateExternalURL } from '../utils/url-validation.js';
 
 export async function channelRoutes(
   fastify: FastifyInstance,
@@ -11,6 +12,21 @@ export async function channelRoutes(
     Body: { project_id: string; type: 'discord' | 'slack'; webhook_url: string };
   }>('/channels', async (request, reply) => {
     const { project_id, type, webhook_url } = request.body;
+
+    // Validate webhook URL (SSRF protection)
+    const urlCheck = validateExternalURL(webhook_url);
+    if (!urlCheck.valid) {
+      reply.code(400);
+      return { success: false, message: urlCheck.error };
+    }
+
+    // Only allow Discord/Slack webhook domains
+    const url = new URL(webhook_url);
+    const allowedHosts = ['discord.com', 'discordapp.com', 'hooks.slack.com'];
+    if (!allowedHosts.some((h) => url.hostname === h || url.hostname.endsWith('.' + h))) {
+      reply.code(400);
+      return { success: false, message: 'Webhook URL must be a Discord or Slack webhook' };
+    }
 
     try {
       const channel = await notificationManager.createChannel(project_id, type, webhook_url);

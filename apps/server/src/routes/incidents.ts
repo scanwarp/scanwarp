@@ -15,7 +15,8 @@ export async function incidentRoutes(
       limit?: number;
     };
 
-    const incidents = await db.getIncidents({ project_id, status, limit });
+    const clampedLimit = Math.max(1, Math.min(1000, Number(limit) || 50));
+    const incidents = await db.getIncidents({ project_id, status, limit: clampedLimit });
     return { incidents };
   });
 

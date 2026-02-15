@@ -200,12 +200,13 @@ Make the fix_prompt actionable enough that an AI coding assistant can implement 
       'duration_ms',
       'status_message',
       'db_system',
-      'db_statement',
     ];
 
     for (const field of relevantFields) {
       if (field in data) {
-        sanitized[field] = data[field];
+        const val = data[field];
+        // Truncate string values to prevent excessive data in prompt
+        sanitized[field] = typeof val === 'string' ? val.slice(0, 500) : val;
       }
     }
 
@@ -214,13 +215,25 @@ Make the fix_prompt actionable enough that an AI coding assistant can implement 
 
   private parseResponse(text: string): DiagnosisResult {
     try {
-      // Try to extract JSON from the response
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      // Try to extract JSON from the response (non-greedy to avoid grabbing too much)
+      const jsonMatch = text.match(/\{[\s\S]*?\}(?=[^}]*$)/) || text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         throw new Error('No JSON found in response');
       }
 
-      const parsed = JSON.parse(jsonMatch[0]);
+      // Find balanced braces for proper JSON extraction
+      const startIdx = text.indexOf('{');
+      if (startIdx === -1) throw new Error('No JSON found in response');
+      let depth = 0;
+      let endIdx = -1;
+      for (let i = startIdx; i < text.length; i++) {
+        if (text[i] === '{') depth++;
+        else if (text[i] === '}') depth--;
+        if (depth === 0) { endIdx = i; break; }
+      }
+      if (endIdx === -1) throw new Error('Unbalanced JSON in response');
+
+      const parsed = JSON.parse(text.slice(startIdx, endIdx + 1));
 
       return {
         root_cause: parsed.root_cause || 'Unable to determine root cause',

@@ -8,6 +8,13 @@ export async function registerGitHubWebhook(
   db: Database,
   webhookSecret?: string
 ) {
+  if (!webhookSecret) {
+    fastify.log.warn('GITHUB_WEBHOOK_SECRET not set — GitHub webhook endpoint disabled');
+    return;
+  }
+
+  const secret = webhookSecret;
+
   fastify.post<{ Body: GitHubWebhookEvent }>(
     '/ingest/github',
     {
@@ -16,28 +23,29 @@ export async function registerGitHubWebhook(
       },
     },
     async (request, reply) => {
-      // Verify webhook signature if secret is configured
-      if (webhookSecret) {
-        const signature = request.headers['x-hub-signature-256'];
-        if (!signature || typeof signature !== 'string') {
-          reply.code(400);
-          return { error: 'Missing x-hub-signature-256 header' };
-        }
+      // Always verify webhook signature
+      const signature = request.headers['x-hub-signature-256'];
+      if (!signature || typeof signature !== 'string') {
+        reply.code(400);
+        return { error: 'Missing x-hub-signature-256 header' };
+      }
 
-        const rawBody = (request as FastifyRequest & { rawBody?: Buffer }).rawBody;
-        if (!rawBody) {
-          reply.code(400);
-          return { error: 'Raw body not available for signature verification' };
-        }
+      const rawBody = (request as FastifyRequest & { rawBody?: Buffer }).rawBody;
+      if (!rawBody) {
+        reply.code(400);
+        return { error: 'Raw body not available for signature verification' };
+      }
 
-        const expectedSignature =
-          'sha256=' + crypto.createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
+      const expectedSignature =
+        'sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
 
-        if (signature !== expectedSignature) {
-          fastify.log.error('GitHub signature verification failed');
-          reply.code(401);
-          return { error: 'Invalid signature' };
-        }
+      // Use timing-safe comparison to prevent timing attacks
+      const sigBuffer = Buffer.from(signature);
+      const expectedBuffer = Buffer.from(expectedSignature);
+      if (sigBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
+        fastify.log.error('GitHub signature verification failed');
+        reply.code(401);
+        return { error: 'Invalid signature' };
       }
 
       const event = request.body;

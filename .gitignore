@@ -3,9 +3,16 @@ dist/
 build/
 *.log
 .env
-.env.local
+.env.*
+!.env.example
 .DS_Store
 coverage/
 .vscode/
 .idea/
 .claude
+*.sqlite
+*.sqlite3
+*.db
+*.pem
+*.key
+*.cert

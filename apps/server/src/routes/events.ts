@@ -22,7 +22,8 @@ export async function eventRoutes(fastify: FastifyInstance, opts: EventRoutesOpt
       limit?: number;
     };
 
-    const events = await db.getEvents({ monitor_id, project_id, type, source, limit });
+    const clampedLimit = Math.max(1, Math.min(1000, Number(limit) || 100));
+    const events = await db.getEvents({ monitor_id, project_id, type, source, limit: clampedLimit });
     return { events };
   });
 
@@ -125,6 +126,10 @@ export async function eventRoutes(fastify: FastifyInstance, opts: EventRoutesOpt
 
     if (!errors || !Array.isArray(errors)) {
       return reply.code(400).send({ error: 'Missing or invalid errors array' });
+    }
+
+    if (errors.length > 100) {
+      return reply.code(400).send({ error: 'Too many errors in a single request (max 100)' });
     }
 
     try {

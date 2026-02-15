@@ -29,7 +29,11 @@ const fastify = Fastify({
   bodyLimit: 1048576 * 5, // 5MB for webhooks
 });
 
-fastify.register(cors);
+fastify.register(cors, {
+  origin: process.env.CORS_ORIGIN || true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  credentials: true,
+});
 
 // Serve the dashboard SPA if the built files exist
 const dashboardDir = path.join(__dirname, 'dashboard');
@@ -94,6 +98,17 @@ if (process.env.SUPABASE_PROJECT_REF && process.env.SUPABASE_SERVICE_KEY) {
 } else {
   console.log('Supabase integration disabled (missing env vars)');
 }
+
+// Security headers
+fastify.addHook('onSend', async (_request, reply) => {
+  reply.header('X-Content-Type-Options', 'nosniff');
+  reply.header('X-Frame-Options', 'DENY');
+  reply.header('X-XSS-Protection', '0');
+  reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (process.env.NODE_ENV === 'production') {
+    reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+});
 
 // Register auth middleware (optional — only active when API_TOKEN is set)
 fastify.register(authMiddleware);

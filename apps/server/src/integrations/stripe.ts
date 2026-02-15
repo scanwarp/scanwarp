@@ -16,47 +16,50 @@ export async function registerStripeWebhook(
   db: Database,
   webhookSecret?: string
 ) {
+  if (!webhookSecret) {
+    fastify.log.warn('STRIPE_WEBHOOK_SECRET not set — Stripe webhook endpoint disabled');
+    return;
+  }
+
+  const secret = webhookSecret;
+
   fastify.post<{ Body: StripeWebhookEvent }>(
     '/ingest/stripe',
     {
       config: {
-        // Need raw body for signature verification
         rawBody: true,
       },
     },
     async (request, reply) => {
-      let event: StripeWebhookEvent = request.body;
+      let event: StripeWebhookEvent;
 
-      // Verify webhook signature if secret is configured
-      if (webhookSecret) {
-        try {
-          const signature = request.headers['stripe-signature'];
-          if (!signature) {
-            reply.code(400);
-            return { error: 'Missing stripe-signature header' };
-          }
-
-          // Get raw body for verification
-          const rawBody = (request as FastifyRequest & { rawBody?: Buffer }).rawBody;
-          if (!rawBody) {
-            reply.code(400);
-            return { error: 'Raw body not available for signature verification' };
-          }
-
-          const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-            apiVersion: '2026-01-28.clover',
-          });
-
-          event = stripe.webhooks.constructEvent(
-            rawBody,
-            signature,
-            webhookSecret
-          ) as unknown as StripeWebhookEvent;
-        } catch (err) {
-          fastify.log.error({ err }, 'Stripe signature verification failed');
+      // Always verify webhook signature
+      try {
+        const signature = request.headers['stripe-signature'];
+        if (!signature) {
           reply.code(400);
-          return { error: 'Invalid signature' };
+          return { error: 'Missing stripe-signature header' };
         }
+
+        const rawBody = (request as FastifyRequest & { rawBody?: Buffer }).rawBody;
+        if (!rawBody) {
+          reply.code(400);
+          return { error: 'Raw body not available for signature verification' };
+        }
+
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+          apiVersion: '2026-01-28.clover',
+        });
+
+        event = stripe.webhooks.constructEvent(
+          rawBody,
+          signature,
+          secret
+        ) as unknown as StripeWebhookEvent;
+      } catch (err) {
+        fastify.log.error({ err }, 'Stripe signature verification failed');
+        reply.code(400);
+        return { error: 'Invalid signature' };
       }
 
       // Only process error events

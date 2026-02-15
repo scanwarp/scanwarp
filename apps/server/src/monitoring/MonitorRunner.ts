@@ -1,5 +1,6 @@
 import type { Database } from '../db/index.js';
 import type { Monitor, Event } from '@scanwarp/core';
+import { validateURLWithDNS } from '../utils/url-validation.js';
 
 interface CheckResult {
   success: boolean;
@@ -90,6 +91,16 @@ export class MonitorRunner {
   }
 
   private async performCheck(url: string): Promise<CheckResult> {
+    // SSRF protection: validate URL before making request
+    const urlCheck = await validateURLWithDNS(url);
+    if (!urlCheck.valid) {
+      return {
+        success: false,
+        responseTime: 0,
+        error: `URL blocked: ${urlCheck.error}`,
+      };
+    }
+
     const startTime = Date.now();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);

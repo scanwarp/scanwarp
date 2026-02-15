@@ -270,7 +270,6 @@ function startDevServer(
     cwd,
     env,
     stdio: ['inherit', 'inherit', 'inherit'],
-    shell: true,
   });
 
   return child;
